@@ -132,8 +132,53 @@ def parseToDo(s):
 	
 decl['doc']['todo'] = parseToDo
 
+def _extractCall(s, key):
+	"""Pull `key(...)` out of s with balanced-paren matching.
+	Returns (inner_text_or_None, s_with_that_call_removed)."""
+	m = re.search(r'\b' + key + r'\s*\(', s)
+	if m is None:
+		return None, s
+	i = m.end()
+	depth = 1
+	while i < len(s) and depth:
+		if s[i] == '(':
+			depth += 1
+		elif s[i] == ')':
+			depth -= 1
+		i += 1
+	inner = s[m.end():i - 1].strip()
+	return inner, (s[:m.start()] + ' ' + s[i:])
+
+# $assert <op> [not] [this(recv)] [params(a, b)] [result(expected)] [message]
+#   op = equal | strictEqual | deepEqual | true   ('not' negates)
+# The documented symbol is called as `name.apply(recv, [params])` and the
+# return value compared to `result` (true = just check truthiness).
+def parseAssert(s):
+	s = s.strip()
+	if not s:
+		return s
+	res = {'raw': s, 'not': False, 'this': None, 'params': None,
+		'result': None, 'message': None, 'op': 'true'}
+	res['this'], s = _extractCall(s, 'this')
+	res['params'], s = _extractCall(s, 'params')
+	res['result'], s = _extractCall(s, 'result')
+
+	words = s.split()
+	if words:
+		res['op'] = words[0]
+		words = words[1:]
+	if words and words[0] == 'not':
+		res['not'] = True
+		words = words[1:]
+	if res['op'] == 'not' and words:  # allow `not equal` as well as `equal not`
+		res['not'] = True
+		res['op'] = words[0]
+		words = words[1:]
+	res['message'] = ' '.join(words).strip() or None
+	return res
+
 decl['unit']['prepare'] = asIs
-decl['unit']['assert'] = asIs #TODO: parse assert
+decl['unit']['assert'] = parseAssert
 
 #Access modifiers
 decl['doc']['private'] = asIs
@@ -389,6 +434,112 @@ def run(url, langs=['js'], skip=[], exclude_hidden=True):
 
 	return res
 
+_ASSERT_OPS = {
+	'equal': ('equal', 'notEqual'),
+	'strictEqual': ('strictEqual', 'notStrictEqual'),
+	'deepEqual': ('deepEqual', 'notDeepEqual'),
+}
+
+def _assertStmt(a):
+	op = a.get('op')
+	neg = bool(a.get('not'))
+	if op == 'true':
+		return 'assert.ok(%s__actual);' % ('!' if neg else '')
+	if op not in _ASSERT_OPS:
+		return 'throw new Error(%s);' % json.dumps('unknown assert op: ' + str(op))
+	fn = _ASSERT_OPS[op][1 if neg else 0]
+	expected = a.get('result')
+	return 'assert.%s(__actual, %s);' % (fn, expected if expected is not None else 'undefined')
+
+def _checkBlock(label, a, name, prepares):
+	recv = a.get('this') or 'null'
+	args = '[' + (a.get('params') or '') + ']'
+	body = list(prepares)
+	body.append('var __actual = %s.apply(%s, %s);' % (name, recv, args))
+	body.append(_assertStmt(a))
+	return '__check(%s, function(){\n%s\n});' % (
+		json.dumps(label), '\n'.join('  ' + line for line in body))
+
+_HARNESS_HEAD = '''const assert = require('assert');
+const __results = [];
+function __check(label, fn){
+  try { fn(); __results.push({label: label, ok: true}); }
+  catch (e) { __results.push({label: label, ok: false, error: String((e && e.message) || e)}); }
+}
+'''
+
+# Execute captured $assert blocks with Node. The documented symbol must be
+# resolvable at module top level (the source file is loaded verbatim), so this
+# runs against self-contained modules / fixtures, not framework code that needs
+# a runtime. Returns (passed, failed, modules_tested).
+def runAsserts(collector):
+	import subprocess
+	import tempfile
+	import shutil
+
+	node = shutil.which('node')
+	if node is None:
+		print('node not found on PATH; cannot execute $assert blocks')
+		return (0, 0, 0)
+
+	passed = failed = tested = 0
+	for lang, container in collector.items():
+		for mid, module in container.get('data', {}).items():
+			checks = []
+			for entry in module.get('content', []):
+				unit = entry.get('unit') or {}
+				asserts = [a for a in (unit.get('assert') or []) if isinstance(a, dict)]
+				name = entry.get('name')
+				if not asserts or not name:
+					continue
+				prepares = unit.get('prepare') or []
+				for j, a in enumerate(asserts):
+					checks.append(_checkBlock('%s::%s#%d' % (mid, name, j), a, name, prepares))
+
+			uri = (module.get('header') or {}).get('uri')
+			if not checks or not uri or not os.path.exists(uri):
+				continue
+			tested += 1
+
+			with open(uri) as f:
+				source = f.read()
+			js = _HARNESS_HEAD + source + '\n' + '\n'.join(checks) + \
+				'\nconsole.log(JSON.stringify(__results));\n'
+
+			path = None
+			try:
+				with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as tf:
+					tf.write(js)
+					path = tf.name
+				proc = subprocess.run([node, path], capture_output=True,
+					text=True, timeout=30)
+			finally:
+				if path:
+					os.unlink(path)
+
+			out = proc.stdout.strip().splitlines()
+			if proc.returncode != 0 and not out:
+				tail = proc.stderr.strip().splitlines()
+				print('  FAIL %s (load): %s' % (mid, tail[-1] if tail else 'exit %d' % proc.returncode))
+				failed += 1
+				continue
+			try:
+				results = json.loads(out[-1])
+			except Exception:
+				print('  FAIL %s: could not read test results' % mid)
+				failed += 1
+				continue
+			for r in results:
+				if r.get('ok'):
+					passed += 1
+					print('  PASS %s' % r['label'])
+				else:
+					failed += 1
+					print('  FAIL %s: %s' % (r['label'], r.get('error')))
+
+	print('asserts: %d passed, %d failed (%d module(s) with tests)' % (passed, failed, tested))
+	return (passed, failed, tested)
+
 def main(argv):
 	import argparse
 	p = argparse.ArgumentParser(
@@ -405,6 +556,8 @@ def main(argv):
 		help='output path; "-" for stdout (default: <root>/dipdoc.json)')
 	p.add_argument('-f', '--format', choices=['json', 'js'], default='js',
 		help='json = plain JSON, js = "var dipdoc = {...}" (default: js)')
+	p.add_argument('--test', action='store_true',
+		help='execute captured $assert blocks with Node and report pass/fail')
 	args = p.parse_args(argv)
 
 	if not os.path.isdir(args.root):
@@ -413,6 +566,10 @@ def main(argv):
 	langs = [x for x in args.languages.split(',') if x]
 	skip = [x for x in args.skip.split(',') if x]
 	res = run(args.root, langs, skip, exclude_hidden=not args.include_hidden)
+
+	if args.test:
+		passed, failed, tested = runAsserts(res)
+		sys.exit(1 if failed else 0)
 
 	out = args.output if args.output is not None else os.path.join(args.root, 'dipdoc.json')
 	outputResult(res, out, args.format)

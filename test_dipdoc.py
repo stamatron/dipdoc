@@ -7,6 +7,7 @@
 # line, which hung the whole threaded run.
 
 import importlib.util
+import shutil
 import dipdoc
 
 
@@ -80,10 +81,36 @@ def test_js_extract():
     print('ok: js extraction')
 
 
+def test_parse_assert():
+    a = dipdoc.parseAssert('equal this(ctx) params(2, 3) result(5) two plus three')
+    assert a['op'] == 'equal' and not a['not']
+    assert a['this'] == 'ctx' and a['params'] == '2, 3' and a['result'] == '5'
+    assert a['message'] == 'two plus three'
+    n = dipdoc.parseAssert('not equal params(1) result(2)')
+    assert n['op'] == 'equal' and n['not'] is True
+    print('ok: parse assert')
+
+
+def test_assert_execution():
+    if shutil.which('node') is None:
+        print('skip: node not on PATH, cannot run $assert executor')
+        return
+    res = _parse('tests/fixture.js')
+    res['header']['uri'] = 'tests/fixture.js'
+    collector = {'js': {'data': {'fixture': res}}}
+    passed, failed, tested = dipdoc.runAsserts(collector)
+    assert tested == 1, 'expected 1 module tested, got %d' % tested
+    assert passed == 4, 'expected 4 passing asserts, got %d' % passed
+    assert failed == 1, 'expected 1 failing assert, got %d' % failed
+    print('ok: assert execution')
+
+
 if __name__ == '__main__':
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         test_file_header_block(tmp)
         test_function_content(tmp)
         test_js_extract()
+        test_parse_assert()
+        test_assert_execution()
     print('all passed')
