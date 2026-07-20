@@ -579,8 +579,10 @@ def runAsserts(collector):
 	print('asserts: %d passed, %d failed (%d module(s) with tests)' % (passed, failed, tested))
 	return (passed, failed, tested)
 
-def main(argv):
+def main(argv=None):
 	import argparse
+	if argv is None:
+		argv = sys.argv[1:]
 	p = argparse.ArgumentParser(
 		prog='dipdoc',
 		description='Extract JSDoc-style docs and inline unit tests from source.')
@@ -618,5 +620,5 @@ def main(argv):
 	outputResult(res, out, args.format)
 
 if __name__ == "__main__":
-	main(sys.argv[1:])
+	main()
 
