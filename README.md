@@ -112,9 +112,10 @@ notice. See `tests/fixture.{js,py,rb}` for the shape.
 ## Languages
 
 Each language has a parser module at `lang/<ext>.py` that supplies the comment
-delimiters and a single-line declaration extractor. The doc block always
+delimiters and a single-line declaration extractor. The doc block normally
 **precedes** the declaration it documents (this is what "follows them" above
-means), so per language:
+means); Python additionally supports an in-body docstring that documents the
+`def` / `class` header directly above it. Per language:
 
 | Lang | Ext   | Doc block            | Single-line |
 |------|-------|----------------------|-------------|
@@ -123,11 +124,15 @@ means), so per language:
 | py   | `.py` | `""" … """`          | `#`         |
 | rb   | `.rb` | `=begin … =end`      | `#`         |
 
-For Python the block is a triple-quoted string written *before* the `def` /
-`class` (a bare string expression — valid Python), not the usual docstring
-*inside* the body:
+For Python the block may be written **either** *before* the `def` / `class`
+(a bare triple-quoted string expression — valid Python) **or** *inside* the
+body as an idiomatic docstring. DipDoc picks the target automatically: a block
+whose immediately preceding line is a `def` / `class` header documents that
+declaration; otherwise it documents the line that follows. This means you can
+point DipDoc at existing code that already uses docstrings.
 
 ```python
+# above the declaration
 """
 @description adds two numbers
 @param {int} x first addend
@@ -135,6 +140,15 @@ For Python the block is a triple-quoted string written *before* the `def` /
 """
 def add(x, y):
     return x + y
+
+# or as an in-body docstring (documents the def above it)
+def mul(a, b):
+    """
+    @description multiplies two numbers
+    @param {int} a first factor
+    @return {int} the product
+    """
+    return a * b
 ```
 
 ## Tests
@@ -168,9 +182,11 @@ are detected for all four languages (`class` in JS/PHP/Python/Ruby, plus PHP
   `@group` / a `parent`); the single-line extractor doesn't track lexical scope,
   so a method written plainly inside a class body lists module-level.
 - Single-line declaration extraction: the parser inspects the one line after a
-  comment, so multi-line signatures and a declaration hidden behind a decorator
-  line (Python `@decorator`, PHP attributes) are not attached. The doc block
-  must sit directly above the declaration.
+  comment (or, for a Python in-body docstring, the one line before the block),
+  so multi-line signatures and a declaration hidden behind a decorator line
+  (Python `@decorator`, PHP attributes) are not attached. The doc block must sit
+  directly above the declaration, or — for a Python docstring — directly below
+  its `def` / `class` header.
 - `java` has no parser module.
 - The browser reader (`dipdoc_reader.js`, `template/`) is still incomplete; use
   `-f md` for viewable output in the meantime.
