@@ -264,7 +264,9 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 							break
 
 			fn_info = lang[extension](stripped)
-			if fn_info is not None and 'name' in fn_info:
+			# e is None when this block was consumed as the file header
+			# above; nothing to attach it to, so skip it as content
+			if e is not None and fn_info is not None and 'name' in fn_info:
 				update(e, fn_info)
 			else:
 				e = None
@@ -337,8 +339,14 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 		def run(self):
 			while True:
 				tup = self.queue.get()
-				doFile(*tup)
-				self.queue.task_done()
+				try:
+					doFile(*tup)
+				except Exception as ex:
+					print('error parsing %s: %s' % (tup[1], ex))
+				finally:
+					# always mark done, else a single parse error
+					# deadlocks q.join() forever
+					self.queue.task_done()
 	
 	q = queue.Queue()
 
