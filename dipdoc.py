@@ -210,12 +210,19 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 	e = {}
 	lines = 0
 	sloc = 0
+	# In-body doc blocks (Python docstrings): a block whose *preceding* line is
+	# a compound declaration (`def`/`class ...:`) documents THAT line, not the
+	# one after it. prev_stripped remembers the immediately previous source
+	# line; pre_decl holds it parsed as a declaration when it qualifies.
+	prev_stripped = ''
+	pre_decl = None
 
 	f = open(uri, 'r')
 	for line in f:
 		lines += 1
-		
+
 		stripped = line.strip()
+		line_raw = stripped
 
 		# Only look for a block-comment opener when not inside a comment body.
 		# Languages like Python use the same delimiter (""") to open and
@@ -228,6 +235,21 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 			e = {}
 			for tag in tags:
 				e[tag['name']] = {}
+
+			# Docstring style: if the line just above the block is a compound
+			# declaration header (ends with ':' and the lang extractor reads it
+			# as a class/function), the block documents it. The ':' keeps this
+			# to suite-opening headers, so an unrelated preceding one-liner
+			# (`def f(): pass`) doesn't get falsely claimed.
+			# ponytail: ':' encodes the Python docstring position; other langs
+			#   (rb/php docs sit above) simply never match, so no forward-path
+			#   regression. Revisit if a colon-suite language needs excluding.
+			pre_decl = None
+			if prev_stripped.rstrip().endswith(':'):
+				cand = lang[extension](prev_stripped)
+				if (cand is not None and cand.get('name')
+						and cand.get('type') in ('class', 'function')):
+					pre_decl = cand
 
 			tag_name = None
 			tp = None
@@ -311,7 +333,9 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 							e = None
 							break
 
-			fn_info = lang[extension](stripped)
+			# Prefer the preceding declaration (docstring style); otherwise
+			# the block documents the following code line (the default).
+			fn_info = pre_decl if pre_decl is not None else lang[extension](stripped)
 			# e is None when this block was consumed as the file header
 			# above; nothing to attach it to, so skip it as content
 			if e is not None and fn_info is not None and 'name' in fn_info:
@@ -324,10 +348,13 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 
 			one_more = False
 			flag = False
+			pre_decl = None
 
 
 		if end is not None:
 			one_more = True;
+
+		prev_stripped = line_raw
 
 	if not eset['header'] and first is not None:
 		if 'file' not in first and 'name' not in first:
