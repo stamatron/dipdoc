@@ -6,30 +6,45 @@ extracts both **documentation** (JSDoc-style `@` tags) and **inline unit tests**
 (`$` tags) — the idea being that the docs and the tests that prove them live in
 the same comment block.
 
-> Status: early / work in progress. The JavaScript parser and the JSON
-> extractor work; the HTML reader and the non-JS language modules are unfinished
-> (see [Limitations](#limitations)).
+> Status: early / work in progress. The JavaScript parser, the JSON/Markdown
+> extractors, and the `$assert` executor work; the browser reader and the non-JS
+> language modules are unfinished (see [Limitations](#limitations)).
+
+## Install
+
+```sh
+pip install -e .
+```
+
+Installs a `dipdoc` command. (Editable install is the supported path; it keeps
+the `lang/` parser modules reachable.) You can also just run `python3 dipdoc.py`
+from a checkout.
 
 ## Usage
 
 ```sh
-python3 dipdoc.py <root-dir> [languages] [skip]
+dipdoc <root-dir> [languages] [options]
 ```
 
 - `<root-dir>` — directory to scan recursively.
 - `languages` — comma-separated list, defaults to `js`. A language `X` requires a
   parser module at `lang/X.py`.
-- `skip` — comma-separated paths (relative to `<root-dir>`) to exclude.
+- `--skip a,b` — paths (relative to `<root-dir>`) to exclude.
+- `--include-hidden` — descend into dot-directories (skipped by default).
+- `-f, --format {json,js,md}` — `js` (default) wraps JSON as `var dipdoc = {...}`
+  for the browser reader; `json` is plain JSON; `md` renders Markdown.
+- `-o, --output PATH` — output file, or `-` for stdout. Defaults to
+  `<root-dir>/dipdoc.<json|md>`.
+- `--test` — execute captured `$assert` blocks with Node and report pass/fail
+  (exits non-zero on failure). Requires `node` on `PATH`.
 
-Example — scan the bundled library for JavaScript docs:
+Examples:
 
 ```sh
-python3 dipdoc.py ivartech js
+dipdoc ivartech js                 # -> ivartech/dipdoc.json (var dipdoc = ...)
+dipdoc ivartech js -f md -o docs.md
+dipdoc tests js --test             # run the inline unit tests
 ```
-
-Output is written to `<root-dir>/dipdoc.json`. Despite the name it is a small
-JavaScript file (`var dipdoc = { ... }`) so the browser reader can load it with
-a plain `<script>` tag.
 
 ## Comment tags
 
@@ -61,15 +76,20 @@ attached to the code line (function / field / dependency) that follows them.
 python3 test_dipdoc.py
 ```
 
+Framework-free smoke tests: parsing, JS extraction, `$assert` parsing/execution
+(via Node, self-skipped if `node` is absent), and the Markdown emitter.
+
 ## Limitations
 
 - Only `lang/js.py` exists; `java` / `php` / `py` modules are not implemented.
-- The browser reader (`dipdoc_reader.js`, `template/`) is incomplete — the
-  `template/js/*.js` files are empty.
-- `$assert` / `$prepare` blocks are captured verbatim but not yet executed as
-  tests.
-- Output path and the `var dipdoc =` wrapper are hard-coded (marked `XXX` in the
-  source).
+- `$assert` execution loads the module source verbatim, so the documented symbol
+  must resolve at module top level. It runs against self-contained modules and
+  fixtures, not code that needs a framework runtime.
+- Single-line declaration extraction: the parser inspects the one line after a
+  comment. It handles functions, arrow functions, classes, `const`/`let`,
+  object methods, prototypes, and exports, but not multi-line signatures.
+- The browser reader (`dipdoc_reader.js`, `template/`) is still incomplete; use
+  `-f md` for viewable output in the meantime.
 
 ## Author
 
