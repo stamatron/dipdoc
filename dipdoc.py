@@ -40,7 +40,7 @@ def update(d1, d2):
 	return d1
 
 tags = [{'pref':'@','name':'doc'},
-  	{'pref':'\$','name':'unit'}]
+  	{'pref':r'\$','name':'unit'}]
 
 decl = {}
 for tag in tags:
@@ -65,7 +65,7 @@ def stripCurlyBrackets(s):
 def parseParam(s):
 	s = s.strip()
 	res = {}
-	prop = re.match('^(\{(?P<type>.*)\})(\s|\t)*(?P<name>(\[(\s|\t)*[a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?(\s|\t)*\])|([a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?))(\s|\t)*(?P<description>.*)$', s)
+	prop = re.match(r'^(\{(?P<type>.*)\})(\s|\t)*(?P<name>(\[(\s|\t)*[a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?(\s|\t)*\])|([a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?))(\s|\t)*(?P<description>.*)$', s)
 	if prop is not None:
 		res['type'] = prop.group('type').split('|')
 		res['name'] = prop.group('name').strip()
@@ -83,7 +83,7 @@ decl['doc']['param'] = parseParam
 def parseReturn(s):
 	s = s.strip()
 	res = {}
-	prop = re.match('^(\{(?P<type>.*)\})(\s|\t)*(?P<description>.*)$', s)
+	prop = re.match(r'^(\{(?P<type>.*)\})(\s|\t)*(?P<description>.*)$', s)
 	if prop is not None:
 		res['type'] = prop.group('type').split('|')
 		res['description'] = prop.group('description')
@@ -151,15 +151,15 @@ comments = {}
 def buildTagParsingRegexp(l):
 	res = []
 	for i in l:
-		res.append('((?P<'+i['name']+'>'+i['pref']+'[\w]+)(?P<'+i['name']+'_rest>.*))');
+		res.append('((?P<'+i['name']+'>'+i['pref']+r'[\w]+)(?P<'+i['name']+'_rest>.*))');
 	return '|'.join(res)
 
 #I know there is too many lines of code but it is fast if this is done in one iteration
-def getCommentData(uri, tags, decl, extension='js',pref='/\*', suf='\*/', decor= '\*', sing='//'):
+def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', decor=r'\*', sing='//'):
 	eset = {'header':{}, 'content':[]}
 	reg_str = buildTagParsingRegexp(tags)
 	tag_re = re.compile(reg_str)
-	strip_re = re.compile("^"+decor+"?\s?(?P<let_me_see_you_stripped>.*)")
+	strip_re = re.compile("^"+decor+r"?\s?(?P<let_me_see_you_stripped>.*)")
 
 	flag = False
 	one_more = False

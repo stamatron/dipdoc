@@ -13,7 +13,7 @@ def jsExtract(s):
 		return
 		
 	isFn = re.match(r'.*function(\s|\t)*.*(\s|\t)*\(', s)
-	isImport = re.match('^.*(import|include|require)(\s|\t)*\(?(\'|\")?(?P<id>[a-zA-Z0-9._$]*)(\'|\")?\)?;?$', s)
+	isImport = re.match(r'^.*(import|include|require)(\s|\t)*\(?(\'|\")?(?P<id>[a-zA-Z0-9._$]*)(\'|\")?\)?;?$', s)
 	if isFn is not None:
 		res['type'] = 'function'
 		#args = re.match(r'.*function(\s|\t)*.*(\s|\t)*\((\s|\t)*(?P<args>([a-zA-Z_$][a-zA-Z0-9_$]*(\s|\t)*,(\s|\t)*)*([a-zA-Z_$][a-zA-Z0-9_$]*)?)(\s|\t)*\)(\s|\t)*\{?', s)
@@ -60,7 +60,7 @@ def jsExtract(s):
 fn = jsExtract
 
 comments = {}
-comments['pref'] = '/\*'
-comments['suf'] = '\*/'
-comments['decor'] = '\*'
+comments['pref'] = r'/\*'
+comments['suf'] = r'\*/'
+comments['decor'] = r'\*'
 comments['single'] = '//'
