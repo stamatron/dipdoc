@@ -314,7 +314,6 @@ def parseCommentLine(line, tags, tag_re):
 def doFile(root, uri, collector, extension='js'):
 	ext = '.'+extension
 	if uri.endswith(ext):
-		print(uri)
 		if not root.endswith(os.sep):
 			root += os.sep
 		iden = '.'.join(uri[len(root):-len(ext)].split(os.sep))
@@ -328,6 +327,7 @@ def doFile(root, uri, collector, extension='js'):
 def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 
 	data = {}
+	errors = 0
 
 	# Serial walk. Parsing is I/O + regex under the GIL, so threads bought
 	# nothing here and the old q.join()-per-directory turned one parse error
@@ -350,24 +350,29 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 			try:
 				doFile(url, fpath, data, ex)
 			except Exception as e:
+				errors += 1
 				print('error parsing %s: %s' % (fpath, e))
 
+	print('%s: %d module(s) parsed, %d error(s)' % (ex, len(data), errors))
 	res[ex] = {
 		'data': data,
 		'details': {'lang': ex, 'root': url},
 	}
 
-#XXX: this is only temporary
-def outputResult(uri, collector):
-	f = open(uri, 'w')
-	f.write('var dipdoc = '+json.dumps(collector,indent=4))
-	f.close()
+def outputResult(collector, out=None, fmt='js'):
+	body = json.dumps(collector, indent=4)
+	if fmt == 'js':
+		# 'js' wraps the JSON so the browser reader can <script src> it
+		body = 'var dipdoc = ' + body
+	if out is None or out == '-':
+		sys.stdout.write(body + '\n')
+	else:
+		with open(out, 'w') as f:
+			f.write(body)
 
-#Run the mother fucker	
 def run(url, langs=['js'], skip=[], exclude_hidden=True):
-	
 	res = {}
-	
+
 	modskip = []
 	for i in skip:
 		modskip.append(os.path.join(url, i))
@@ -376,23 +381,42 @@ def run(url, langs=['js'], skip=[], exclude_hidden=True):
 	for ex in langs:
 		mod = importFromURI('lang/'+ex+'.py')
 		if mod is None:
+			print('warning: no parser module for language %r (lang/%s.py); skipping' % (ex, ex))
 			continue
 		lang[ex] = mod.fn
 		comments[ex] = mod.comments
 		doForAllLangs(res, url, ex, skip, exclude_hidden)
 
-	#XXX: only temporary
-	outputResult(os.path.join(url, 'dipdoc.json'), res)
+	return res
 
 def main(argv):
-	ln = len(argv)
-	if ln == 2:
-		run(argv[0], argv[1].split(','))
-	elif ln > 2:
-		run(argv[0], argv[1].split(','), argv[2].split(','))
-	else:
-		run(argv[0])
+	import argparse
+	p = argparse.ArgumentParser(
+		prog='dipdoc',
+		description='Extract JSDoc-style docs and inline unit tests from source.')
+	p.add_argument('root', help='directory to scan recursively')
+	p.add_argument('languages', nargs='?', default='js',
+		help='comma-separated languages (default: js); needs lang/<X>.py')
+	p.add_argument('--skip', default='',
+		help='comma-separated paths (relative to root) to exclude')
+	p.add_argument('--include-hidden', action='store_true',
+		help='descend into dot-directories (excluded by default)')
+	p.add_argument('-o', '--output',
+		help='output path; "-" for stdout (default: <root>/dipdoc.json)')
+	p.add_argument('-f', '--format', choices=['json', 'js'], default='js',
+		help='json = plain JSON, js = "var dipdoc = {...}" (default: js)')
+	args = p.parse_args(argv)
+
+	if not os.path.isdir(args.root):
+		p.error('root %r is not a directory' % args.root)
+
+	langs = [x for x in args.languages.split(',') if x]
+	skip = [x for x in args.skip.split(',') if x]
+	res = run(args.root, langs, skip, exclude_hidden=not args.include_hidden)
+
+	out = args.output if args.output is not None else os.path.join(args.root, 'dipdoc.json')
+	outputResult(res, out, args.format)
 
 if __name__ == "__main__":
-   main(sys.argv[1:])
+	main(sys.argv[1:])
 
