@@ -24,4 +24,8 @@ py-modules = ["dipdoc"]
 
 [tool.ruff]
 line-length = 100
-# The tree uses tabs; don't fight it.
+
+[tool.ruff.lint]
+# Pyflakes (F) + syntax/runtime errors (E9): catch real breakage without
+# bikeshedding the existing tab-indented style. Widen later if desired.
+select = ["E9", "F"]

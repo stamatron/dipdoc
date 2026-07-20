@@ -189,9 +189,9 @@ decl['doc']['excerpt'] = stripWhitespace
 lang = {}
 comments = {}
 
-def buildTagParsingRegexp(l):
+def buildTagParsingRegexp(taglist):
 	res = []
-	for i in l:
+	for i in taglist:
 		res.append('((?P<'+i['name']+'>'+i['pref']+r'[\w]+)(?P<'+i['name']+'_rest>.*))');
 	return '|'.join(res)
 
