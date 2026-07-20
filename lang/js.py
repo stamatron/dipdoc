@@ -1,61 +1,110 @@
 import re
 
+# Declaration extractor for the code line that follows a doc comment.
+# It still only looks at a single line, but recognises the common modern
+# JS shapes: function declarations, arrow functions, classes, const/let,
+# object-literal methods, prototype methods, exports, and imports.
+
+_ID = r'[A-Za-z_$][\w$]*'
+
+
 def jsExtract(s):
 	s = s.strip()
-	res = {}
-	res['doc'] = {}
-	#TODO: dont frgt class for other languages 
 	if not s:
 		return
-	
-	isComment = re.match(r'^(/\*|//)', s) is not None
-	if isComment:
+	if re.match(r'^(/\*|//)', s):
 		return
-		
-	isFn = re.match(r'.*function(\s|\t)*.*(\s|\t)*\(', s)
-	isImport = re.match(r'^.*(import|include|require)(\s|\t)*\(?(\'|\")?(?P<id>[a-zA-Z0-9._$]*)(\'|\")?\)?;?$', s)
-	if isFn is not None:
-		res['type'] = 'function'
-		#args = re.match(r'.*function(\s|\t)*.*(\s|\t)*\((\s|\t)*(?P<args>([a-zA-Z_$][a-zA-Z0-9_$]*(\s|\t)*,(\s|\t)*)*([a-zA-Z_$][a-zA-Z0-9_$]*)?)(\s|\t)*\)(\s|\t)*\{?', s)
-		#if args is not None:
-		#	res['args'] = args.group('args').split(',')
-		proto = re.match(r'^(?P<parent>..*)\.prototype\.(?P<name>..*)(\s|\t)*=', s)
-		if proto is not None:
-			res['name'] = proto.group('name')
-			res['parent'] = proto.group('parent')
-			#res['namespace'] = '.'.join(proto.group('parent').split('.')[:-1])
-			#res['doc']['this'] = proto.group('parent')
-			return res
-			
-		fn = re.match(r'^function(\s|\t)*(?P<name>..*)(\s|\t)*\(', s)
-		if fn is not None:
-			res['name'] = fn.group('name')
-			return res
-	
-	elif isImport is not None:
-		res['type'] = 'dependency'
-		res['name'] = isImport.group('id')
+
+	# Peel a leading `export` / `export default` so the patterns below see
+	# the bare declaration (e.g. `export const foo = () => {}`).
+	s = re.sub(r'^export\s+default\s+', '', s)
+	s = re.sub(r'^export\s+', '', s)
+	s = re.sub(r'^module\.exports\s*=\s*', '', s)
+
+	res = {'doc': {}}
+
+	# class Foo [extends Bar]
+	m = re.match(r'^class\s+(?P<name>' + _ID + r')', s)
+	if m:
+		res['type'] = 'class'
+		res['name'] = m.group('name')
+		ext = re.search(r'extends\s+(?P<parent>[\w$.]+)', s)
+		if ext:
+			res['parent'] = ext.group('parent')
 		return res
-	else:
+
+	# X.prototype.y = function ...
+	m = re.match(r'^(?P<parent>.+?)\.prototype\.(?P<name>' + _ID + r')\s*=', s)
+	if m and 'function' in s:
+		res['type'] = 'function'
+		res['name'] = m.group('name')
+		res['parent'] = m.group('parent')
+		return res
+
+	# function name(...) / async function* name(...)
+	m = re.match(r'^(?:async\s+)?function\s*\*?\s*(?P<name>' + _ID + r')\s*\(', s)
+	if m:
+		res['type'] = 'function'
+		res['name'] = m.group('name')
+		return res
+
+	# const/let/var name = (...) =>  |  name = arg =>   (arrow function)
+	arrow = r'\s*=\s*(?:async\s+)?(?:\([^)]*\)|' + _ID + r')\s*=>'
+	m = re.match(r'^(?:const|let|var)\s+(?P<name>' + _ID + r')' + arrow, s)
+	if m:
+		res['type'] = 'function'
+		res['name'] = m.group('name')
+		return res
+
+	# parent.name = (...) =>   |   name = (...) =>   (arrow assigned, no decl)
+	m = re.match(r'^(?P<parent>(?:' + _ID + r'\.)*)(?P<name>' + _ID + r')' + arrow, s)
+	if m:
+		res['type'] = 'function'
+		res['name'] = m.group('name')
+		if m.group('parent'):
+			res['parent'] = m.group('parent').rstrip('.')
+		return res
+
+	# name: function(...)  |  name: (...) =>   (object-literal method)
+	m = re.match(r'^(?P<name>' + _ID + r')\s*:\s*(?:async\s+)?'
+		r'(?:function|\([^)]*\)\s*=>|' + _ID + r'\s*=>)', s)
+	if m:
+		res['type'] = 'function'
+		res['name'] = m.group('name')
+		return res
+
+	# import / include / require
+	m = re.match(r'^.*(?:import|include|require)\s*\(?[\'"]?'
+		r'(?P<id>[\w.$/]*)[\'"]?\)?;?$', s)
+	if m and m.group('id'):
+		res['type'] = 'dependency'
+		res['name'] = m.group('id')
+		return res
+
+	# this.name =
+	m = re.match(r'^this\.(?P<name>' + _ID + r')\s*=(?!=)', s)
+	if m:
 		res['type'] = 'field'
-		
-	this = re.match(r'^this\.(?P<name>..*)(\s|\t)*=', s)
-	if this is not None:
-		res['name'] = this.group('name')
+		res['name'] = m.group('name')
 		res['parent'] = 'this'
 		return res
-		
-	var = re.match(r'^var(\s|\t)*(?P<name>..*)(\s|\t)*=', s)
-	if var is not None:
-		res['name'] = var.group('name')
+
+	# const/let/var name =   (plain field)
+	m = re.match(r'^(?:const|let|var)\s+(?P<name>' + _ID + r')\s*=(?!=)', s)
+	if m:
+		res['type'] = 'field'
+		res['name'] = m.group('name')
 		return res
-		
-	other = re.match(r'^(?P<parent>(..*\.)*)(?P<name>..*)(\s|\t)*=', s)
-	if other is not None:
-		res['name'] = other.group('name')
-		if other.group('parent') is not None:
-			res['parent'] = other.group('parent')
+
+	# parent.name =  |  name =   (plain assignment field)
+	m = re.match(r'^(?P<parent>(?:' + _ID + r'\.)*)(?P<name>' + _ID + r')\s*=(?!=)', s)
+	if m:
+		res['type'] = 'field'
+		res['name'] = m.group('name')
+		if m.group('parent'):
+			res['parent'] = m.group('parent').rstrip('.')
 		return res
+
 
 fn = jsExtract
 

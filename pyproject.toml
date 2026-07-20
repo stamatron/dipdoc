@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dipdoc"
+version = "0.1.0"
+description = "Extract JSDoc-style docs and inline unit tests from source in one pass"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{ name = "Nikola Stamatovic Stamat" }]
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+dipdoc = "dipdoc:main"
+
+[tool.setuptools]
+# ponytail: single-module + the lang/ resources it loads relative to __file__.
+# Editable install (`pip install -e .`) is the supported path today; a proper
+# wheel that bundles lang/ as package data is the upgrade if this ever ships to
+# PyPI.
+py-modules = ["dipdoc"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Pyflakes (F) + syntax/runtime errors (E9): catch real breakage without
+# bikeshedding the existing tab-indented style. Widen later if desired.
+select = ["E9", "F"]
