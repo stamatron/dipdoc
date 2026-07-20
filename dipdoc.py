@@ -352,10 +352,6 @@ def parseCommentLine(line, tags, tag_re):
 		return res
 	return line
 
-#mdf = open('README.md', 'r')
-#md = mdf.read()
-#print markdown.markdown(md)
-
 def doFile(root, uri, collector, extension='js'):
 	ext = '.'+extension
 	if uri.endswith(ext):
@@ -404,11 +400,54 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 		'details': {'lang': ex, 'root': url},
 	}
 
+def emitMarkdown(collector):
+	"""Render the collector as plain Markdown so output is viewable without
+	the (unfinished) browser reader."""
+	out = []
+	for lang, container in collector.items():
+		data = container.get('data', {})
+		for mid in sorted(data):
+			module = data[mid]
+			out.append('# %s' % mid)
+			hdr = module.get('header') or {}
+			for d in hdr.get('description') or []:
+				out.append('')
+				out.append(d)
+
+			for entry in module.get('content') or []:
+				name = entry.get('name') or '(anonymous)'
+				typ = entry.get('type') or ''
+				out.append('')
+				out.append('## `%s`%s' % (name, ' — %s' % typ if typ else ''))
+				doc = entry.get('doc') or {}
+				for d in doc.get('description') or []:
+					out.append('')
+					out.append(d)
+				for prm in doc.get('param') or []:
+					if isinstance(prm, dict):
+						t = '|'.join(prm.get('type') or [])
+						out.append('- **param** `%s`%s — %s' % (
+							prm.get('name', ''), ' {%s}' % t if t else '',
+							prm.get('description', '')))
+				for ret in doc.get('return') or []:
+					if isinstance(ret, dict):
+						t = '|'.join(ret.get('type') or [])
+						out.append('- **returns**%s — %s' % (
+							' {%s}' % t if t else '', ret.get('description', '')))
+				for a in (entry.get('unit') or {}).get('assert') or []:
+					if isinstance(a, dict):
+						out.append('- _assert_: `%s`' % a.get('raw', ''))
+			out.append('')
+	return '\n'.join(out).strip() + '\n'
+
 def outputResult(collector, out=None, fmt='js'):
-	body = json.dumps(collector, indent=4)
-	if fmt == 'js':
-		# 'js' wraps the JSON so the browser reader can <script src> it
-		body = 'var dipdoc = ' + body
+	if fmt == 'md':
+		body = emitMarkdown(collector)
+	else:
+		body = json.dumps(collector, indent=4)
+		if fmt == 'js':
+			# 'js' wraps the JSON so the browser reader can <script src> it
+			body = 'var dipdoc = ' + body
 	if out is None or out == '-':
 		sys.stdout.write(body + '\n')
 	else:
@@ -554,8 +593,8 @@ def main(argv):
 		help='descend into dot-directories (excluded by default)')
 	p.add_argument('-o', '--output',
 		help='output path; "-" for stdout (default: <root>/dipdoc.json)')
-	p.add_argument('-f', '--format', choices=['json', 'js'], default='js',
-		help='json = plain JSON, js = "var dipdoc = {...}" (default: js)')
+	p.add_argument('-f', '--format', choices=['json', 'js', 'md'], default='js',
+		help='json = plain JSON, js = "var dipdoc = {...}", md = Markdown (default: js)')
 	p.add_argument('--test', action='store_true',
 		help='execute captured $assert blocks with Node and report pass/fail')
 	args = p.parse_args(argv)
@@ -571,7 +610,11 @@ def main(argv):
 		passed, failed, tested = runAsserts(res)
 		sys.exit(1 if failed else 0)
 
-	out = args.output if args.output is not None else os.path.join(args.root, 'dipdoc.json')
+	if args.output is not None:
+		out = args.output
+	else:
+		ext = 'md' if args.format == 'md' else 'json'
+		out = os.path.join(args.root, 'dipdoc.' + ext)
 	outputResult(res, out, args.format)
 
 if __name__ == "__main__":

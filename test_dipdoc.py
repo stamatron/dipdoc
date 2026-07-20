@@ -105,6 +105,24 @@ def test_assert_execution():
     print('ok: assert execution')
 
 
+def test_emit_markdown(tmp):
+    src = tmp + '/md.js'
+    with open(src, 'w') as f:
+        f.write('/**\n'
+                ' * @description does a thing\n'
+                ' * @param {string} x the name\n'
+                ' * @return {number} a count\n'
+                ' */\n'
+                'function thing(x) {}\n')
+    res = _parse(src)
+    collector = {'js': {'data': {'md': res}}}
+    out = dipdoc.emitMarkdown(collector)
+    assert '## `thing`' in out, 'function heading missing:\n%s' % out
+    assert '**param** `x`' in out, 'param missing:\n%s' % out
+    assert '**returns**' in out, 'return missing:\n%s' % out
+    print('ok: emit markdown')
+
+
 if __name__ == '__main__':
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
@@ -113,4 +131,5 @@ if __name__ == '__main__':
         test_js_extract()
         test_parse_assert()
         test_assert_execution()
+        test_emit_markdown(tmp)
     print('all passed')
