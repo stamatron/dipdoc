@@ -281,10 +281,30 @@ def test_emit_markdown(tmp):
     res = _parse(src)
     collector = {'js': {'data': {'md': res}}}
     out = dipdoc.emitMarkdown(collector)
-    assert '## `thing`' in out, 'function heading missing:\n%s' % out
+    assert '## Contents' in out, 'Contents sidebar missing:\n%s' % out
+    assert '## Functions' in out, 'Functions section missing:\n%s' % out
+    assert '### `thing`' in out, 'function heading missing:\n%s' % out
     assert '**param** `x`' in out, 'param missing:\n%s' % out
     assert '**returns**' in out, 'return missing:\n%s' % out
     print('ok: emit markdown')
+
+
+def test_emit_markdown_classes(tmp):
+    # A class plus a prototype method that names its parent should nest the
+    # method under the class in the Contents sidebar and body.
+    src = tmp + '/cls.js'
+    with open(src, 'w') as f:
+        f.write('/**\n * @description a widget\n */\n'
+                'class Widget {}\n'
+                '/**\n * @description render it\n * @this Widget\n */\n'
+                'function draw() {}\n')
+    res = _parse(src)
+    collector = {'js': {'data': {'cls': res}}}
+    out = dipdoc.emitMarkdown(collector)
+    assert '## `Widget`' in out, 'class heading missing:\n%s' % out
+    assert '### `Widget.draw`' in out, 'method not nested under class:\n%s' % out
+    assert '(#widgetdraw)' in out, 'nested TOC anchor missing:\n%s' % out
+    print('ok: emit markdown classes')
 
 
 if __name__ == '__main__':
@@ -306,4 +326,5 @@ if __name__ == '__main__':
         test_assert_execution_rb()
         test_multiline_prepare(tmp)
         test_emit_markdown(tmp)
+        test_emit_markdown_classes(tmp)
     print('all passed')

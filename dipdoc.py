@@ -405,43 +405,141 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 		'details': {'lang': ex, 'root': url},
 	}
 
+def _slug(s):
+	"""GitHub-flavoured heading anchor: lowercase, punctuation dropped,
+	spaces to hyphens. Good enough for in-doc Contents links."""
+	s = s.lower().replace(' ', '-')
+	return re.sub(r'[^a-z0-9\-_]', '', s)
+
+def _first(v):
+	return v[0] if isinstance(v, list) and v else v
+
+def _ownerOf(entry):
+	"""Which class/group an entry belongs to: explicit @this/@group/@class
+	wins, else the extractor-supplied parent (e.g. Foo.prototype.bar)."""
+	doc = entry.get('doc') or {}
+	for key in ('this', 'group', 'class'):
+		v = _first(doc.get(key))
+		if isinstance(v, str) and v.strip():
+			return v.strip()
+	return entry.get('parent')
+
+def _groupModule(module):
+	"""Bucket a module's content by class. Classes are the type=='class'
+	entries; a function/field is nested under a class when its owner matches,
+	otherwise it stays module-level. Dependencies are always module-level.
+	(Scope isn't tracked across the single-line extractor, so a method only
+	nests when @this/@group/@parent names its class.)"""
+	from collections import OrderedDict
+	classes = OrderedDict()
+	top = {'function': [], 'field': [], 'dependency': []}
+	content = module.get('content') or []
+	for e in content:
+		if e.get('type') == 'class':
+			classes.setdefault(e.get('name'), {'entry': e, 'function': [], 'field': []})
+	for e in content:
+		t = e.get('type')
+		if t == 'class':
+			continue
+		owner = _ownerOf(e)
+		if t in ('function', 'field') and owner in classes:
+			classes[owner][t].append(e)
+		elif t in top:
+			top[t].append(e)
+	return classes, top
+
+def _emitEntry(out, entry, level):
+	name = entry.get('name') or '(anonymous)'
+	out.append('')
+	out.append('%s `%s`' % ('#' * level, name))
+	doc = entry.get('doc') or {}
+	for d in doc.get('description') or []:
+		out.append('')
+		out.append(d)
+	for prm in doc.get('param') or []:
+		if isinstance(prm, dict):
+			t = '|'.join(prm.get('type') or [])
+			out.append('- **param** `%s`%s — %s' % (
+				prm.get('name', ''), ' {%s}' % t if t else '',
+				prm.get('description', '')))
+	for ret in doc.get('return') or []:
+		if isinstance(ret, dict):
+			t = '|'.join(ret.get('type') or [])
+			out.append('- **returns**%s — %s' % (
+				' {%s}' % t if t else '', ret.get('description', '')))
+	for a in (entry.get('unit') or {}).get('assert') or []:
+		if isinstance(a, dict):
+			out.append('- _assert_: `%s`' % a.get('raw', ''))
+
 def emitMarkdown(collector):
-	"""Render the collector as plain Markdown so output is viewable without
-	the (unfinished) browser reader."""
+	"""Render the collector as Markdown: a per-module header, a Contents
+	sidebar (functions grouped under their class/module), then the sections."""
 	out = []
 	for lang, container in collector.items():
 		data = container.get('data', {})
 		for mid in sorted(data):
 			module = data[mid]
+			classes, top = _groupModule(module)
 			out.append('# %s' % mid)
 			hdr = module.get('header') or {}
 			for d in hdr.get('description') or []:
 				out.append('')
 				out.append(d)
+			for key, label in (('author', 'Author'), ('version', 'Version'),
+					('licence', 'Licence')):
+				vals = hdr.get(key)
+				if vals:
+					out.append('')
+					out.append('**%s:** %s' % (label, ', '.join(vals)))
 
-			for entry in module.get('content') or []:
-				name = entry.get('name') or '(anonymous)'
-				typ = entry.get('type') or ''
+			# Contents sidebar — classes (with their members), then top-level.
+			toc = []
+			for nm, grp in classes.items():
+				toc.append('- [`%s`](#%s)' % (nm, _slug(nm)))
+				for e in grp['function'] + grp['field']:
+					en = e.get('name') or ''
+					toc.append('  - [`%s`](#%s)' % (en, _slug(nm + '.' + en)))
+			for e in top['function']:
+				en = e.get('name') or ''
+				toc.append('- [`%s`](#%s)' % (en, _slug(en)))
+			if toc:
 				out.append('')
-				out.append('## `%s`%s' % (name, ' — %s' % typ if typ else ''))
-				doc = entry.get('doc') or {}
-				for d in doc.get('description') or []:
+				out.append('## Contents')
+				out.append('')
+				out.extend(toc)
+
+			# Classes and their members.
+			for nm, grp in classes.items():
+				ce = grp['entry']
+				out.append('')
+				parent = ce.get('parent')
+				out.append('## `%s`%s' % (nm, ' extends `%s`' % parent if parent else ''))
+				for d in (ce.get('doc') or {}).get('description') or []:
 					out.append('')
 					out.append(d)
-				for prm in doc.get('param') or []:
-					if isinstance(prm, dict):
-						t = '|'.join(prm.get('type') or [])
-						out.append('- **param** `%s`%s — %s' % (
-							prm.get('name', ''), ' {%s}' % t if t else '',
-							prm.get('description', '')))
-				for ret in doc.get('return') or []:
-					if isinstance(ret, dict):
-						t = '|'.join(ret.get('type') or [])
-						out.append('- **returns**%s — %s' % (
-							' {%s}' % t if t else '', ret.get('description', '')))
-				for a in (entry.get('unit') or {}).get('assert') or []:
-					if isinstance(a, dict):
-						out.append('- _assert_: `%s`' % a.get('raw', ''))
+				for e in grp['function'] + grp['field']:
+					# nest anchor under the class: heading `Class.member`
+					e2 = dict(e)
+					e2['name'] = '%s.%s' % (nm, e.get('name'))
+					_emitEntry(out, e2, 3)
+
+			# Top-level functions and fields.
+			if top['function']:
+				out.append('')
+				out.append('## Functions')
+				for e in top['function']:
+					_emitEntry(out, e, 3)
+			if top['field']:
+				out.append('')
+				out.append('## Fields')
+				for e in top['field']:
+					_emitEntry(out, e, 3)
+			if top['dependency']:
+				out.append('')
+				out.append('## Dependencies')
+				out.append('')
+				for e in top['dependency']:
+					out.append('- `%s`' % (e.get('name') or ''))
 			out.append('')
 	return '\n'.join(out).strip() + '\n'
 
