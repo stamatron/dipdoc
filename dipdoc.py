@@ -13,31 +13,23 @@ import sys
 import os
 import re
 import json
-import imp
+import importlib.util
 import threading
-import Queue
-
-import lib.markdown2
+import queue
 
 def importFromURI(uri, absl=False):
-	mod = None
 	if not absl:
 		uri = os.path.normpath(os.path.join(os.path.dirname(__file__), uri))
-	path, fname = os.path.split(uri)
-	mname, ext = os.path.splitext(fname)
-
-	if os.path.exists(os.path.join(path,mname)+'.pyc'):
-		try:
-			return imp.load_compiled(mname, uri)
-		except:
-			pass
-	if os.path.exists(os.path.join(path,mname)+'.py'):
-		try:
-			return imp.load_source(mname, uri)
-		except:
-			pass
-
-	return mod
+	if not os.path.exists(uri):
+		return None
+	mname = os.path.splitext(os.path.basename(uri))[0]
+	try:
+		spec = importlib.util.spec_from_file_location(mname, uri)
+		mod = importlib.util.module_from_spec(spec)
+		spec.loader.exec_module(mod)
+		return mod
+	except Exception:
+		return None
 
 def update(d1, d2):
 	for k,v in d2.items():
@@ -48,7 +40,7 @@ def update(d1, d2):
 	return d1
 
 tags = [{'pref':'@','name':'doc'},
-  	{'pref':'\$','name':'unit'}]
+  	{'pref':r'\$','name':'unit'}]
 
 decl = {}
 for tag in tags:
@@ -73,7 +65,7 @@ def stripCurlyBrackets(s):
 def parseParam(s):
 	s = s.strip()
 	res = {}
-	prop = re.match('^(\{(?P<type>.*)\})(\s|\t)*(?P<name>(\[(\s|\t)*[a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?(\s|\t)*\])|([a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?))(\s|\t)*(?P<description>.*)$', s)
+	prop = re.match(r'^(\{(?P<type>.*)\})(\s|\t)*(?P<name>(\[(\s|\t)*[a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?(\s|\t)*\])|([a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?))(\s|\t)*(?P<description>.*)$', s)
 	if prop is not None:
 		res['type'] = prop.group('type').split('|')
 		res['name'] = prop.group('name').strip()
@@ -91,7 +83,7 @@ decl['doc']['param'] = parseParam
 def parseReturn(s):
 	s = s.strip()
 	res = {}
-	prop = re.match('^(\{(?P<type>.*)\})(\s|\t)*(?P<description>.*)$', s)
+	prop = re.match(r'^(\{(?P<type>.*)\})(\s|\t)*(?P<description>.*)$', s)
 	if prop is not None:
 		res['type'] = prop.group('type').split('|')
 		res['description'] = prop.group('description')
@@ -159,15 +151,15 @@ comments = {}
 def buildTagParsingRegexp(l):
 	res = []
 	for i in l:
-		res.append('((?P<'+i['name']+'>'+i['pref']+'[\w]+)(?P<'+i['name']+'_rest>.*))');
+		res.append('((?P<'+i['name']+'>'+i['pref']+r'[\w]+)(?P<'+i['name']+'_rest>.*))');
 	return '|'.join(res)
 
 #I know there is too many lines of code but it is fast if this is done in one iteration
-def getCommentData(uri, tags, decl, extension='js',pref='/\*', suf='\*/', decor= '\*', sing='//'):
+def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', decor=r'\*', sing='//'):
 	eset = {'header':{}, 'content':[]}
 	reg_str = buildTagParsingRegexp(tags)
 	tag_re = re.compile(reg_str)
-	strip_re = re.compile("^"+decor+"?\s?(?P<let_me_see_you_stripped>.*)")
+	strip_re = re.compile("^"+decor+r"?\s?(?P<let_me_see_you_stripped>.*)")
 
 	flag = False
 	one_more = False
@@ -322,7 +314,7 @@ def parseCommentLine(line, tags, tag_re):
 def doFile(root, uri, collector, extension='js'):
 	ext = '.'+extension
 	if uri.endswith(ext):
-		print uri
+		print(uri)
 		if not root.endswith(os.sep):
 			root += os.sep
 		iden = '.'.join(uri[len(root):-len(ext)].split(os.sep))
@@ -348,13 +340,13 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 				doFile(*tup)
 				self.queue.task_done()
 	
-	queue = Queue.Queue()
-	
+	q = queue.Queue()
+
 	for i in range(10):
-		t = ThreadFile(queue)
-		t.setDaemon(True)
+		t = ThreadFile(q)
+		t.daemon = True
 		t.start()
-		
+
 	for root, dirs, files in os.walk(url):
 		if exclude_hidden:
 			for d in dirs:
@@ -371,9 +363,9 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 			if fpath in skip:
 				continue
 		
-			queue.put((url, fpath, data, ex))
-					
-		queue.join()
+			q.put((url, fpath, data, ex))
+
+		q.join()
 		
 		container = {}
 		container['data'] = data
@@ -409,11 +401,11 @@ def run(url, langs=['js'], skip=[], exclude_hidden=True):
 				doForAllLangs(*tup)
 				self.queue.task_done()
 	
-	queue = Queue.Queue()
-		
+	q = queue.Queue()
+
 	for i in range(3):
-		t = ThreadAllLangs(queue)
-		t.setDaemon(True)
+		t = ThreadAllLangs(q)
+		t.daemon = True
 		t.start()
 		
 	for ex in langs:
@@ -427,8 +419,8 @@ def run(url, langs=['js'], skip=[], exclude_hidden=True):
 		else:
 			continue
 			
-		queue.put((res, url, ex, skip, exclude_hidden))
-	queue.join()
+		q.put((res, url, ex, skip, exclude_hidden))
+	q.join()
 	
 	#XXX: only temporary
 	outputResult(os.path.join(url, 'dipdoc.json'), res)

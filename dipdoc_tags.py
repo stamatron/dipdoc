@@ -1,7 +1,7 @@
 import re
 
 tags = [{'pref':'@','name':'doc'},
-  	{'pref':'\$','name':'unit'}]
+  	{'pref':r'\$','name':'unit'}]
 
 decl = {}
 for tag in tags:
@@ -26,7 +26,7 @@ def stripCurlyBrackets(s):
 def parseParam(s):
 	s = s.strip()
 	res = {}
-	prop = re.match('^(\{(?P<type>.*)\})(\s|\t)*(?P<name>(\[(\s|\t)*[a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?(\s|\t)*\])|([a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?))(\s|\t)*(?P<description>.*)$', s)
+	prop = re.match(r'^(\{(?P<type>.*)\})(\s|\t)*(?P<name>(\[(\s|\t)*[a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?(\s|\t)*\])|([a-zA-Z_$][a-zA-Z0-9_$.]*(\s|\t)*(=([0-9.]*|(true|false|undefined|null)|(\{.*\})|(\[.*\])|(".*")|(\'.*\')))?))(\s|\t)*(?P<description>.*)$', s)
 	if prop is not None:
 		res['type'] = prop.group('type').split('|')
 		res['name'] = prop.group('name').strip()
@@ -44,7 +44,7 @@ decl['doc']['param'] = parseParam
 def parseReturn(s):
 	s = s.strip()
 	res = {}
-	prop = re.match('^(\{(?P<type>.*)\})(\s|\t)*(?P<description>.*)$', s)
+	prop = re.match(r'^(\{(?P<type>.*)\})(\s|\t)*(?P<description>.*)$', s)
 	if prop is not None:
 		res['type'] = prop.group('type').split('|')
 		res['description'] = prop.group('description')
