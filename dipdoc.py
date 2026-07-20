@@ -14,8 +14,6 @@ import os
 import re
 import json
 import importlib.util
-import threading
-import queue
 
 def importFromURI(uri, absl=False):
 	if not absl:
@@ -328,33 +326,12 @@ def doFile(root, uri, collector, extension='js'):
 		collector[iden] = result
 
 def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
-	
+
 	data = {}
-	
-	class ThreadFile(threading.Thread):
-		def __init__(self, queue):
-			threading.Thread.__init__(self)
-			self.queue = queue
 
-		def run(self):
-			while True:
-				tup = self.queue.get()
-				try:
-					doFile(*tup)
-				except Exception as ex:
-					print('error parsing %s: %s' % (tup[1], ex))
-				finally:
-					# always mark done, else a single parse error
-					# deadlocks q.join() forever
-					self.queue.task_done()
-	
-	q = queue.Queue()
-
-	for i in range(10):
-		t = ThreadFile(q)
-		t.daemon = True
-		t.start()
-
+	# Serial walk. Parsing is I/O + regex under the GIL, so threads bought
+	# nothing here and the old q.join()-per-directory turned one parse error
+	# into a hang. A plain loop is simpler and just as fast.
 	for root, dirs, files in os.walk(url):
 		if exclude_hidden:
 			# slice-assign: mutating dirs in place prunes the walk, but
@@ -364,22 +341,21 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 		if root in skip:
 			dirs[:] = []
 			continue
-		
+
 		for f in files:
 			fpath = os.path.join(root, f)
 			if fpath in skip:
 				continue
-		
-			q.put((url, fpath, data, ex))
 
-		q.join()
-		
-		container = {}
-		container['data'] = data
-		container['details'] = {}
-		container['details']['lang'] = ex
-		container['details']['root'] = url
-		res[ex] = container
+			try:
+				doFile(url, fpath, data, ex)
+			except Exception as e:
+				print('error parsing %s: %s' % (fpath, e))
+
+	res[ex] = {
+		'data': data,
+		'details': {'lang': ex, 'root': url},
+	}
 
 #XXX: this is only temporary
 def outputResult(uri, collector):
@@ -396,39 +372,15 @@ def run(url, langs=['js'], skip=[], exclude_hidden=True):
 	for i in skip:
 		modskip.append(os.path.join(url, i))
 	skip = modskip
-	
-	class ThreadAllLangs(threading.Thread):
-		def __init__(self, queue):
-			threading.Thread.__init__(self)
-			self.queue = queue
 
-		def run(self):
-			while True:
-				tup = self.queue.get()
-				doForAllLangs(*tup)
-				self.queue.task_done()
-	
-	q = queue.Queue()
-
-	for i in range(3):
-		t = ThreadAllLangs(q)
-		t.daemon = True
-		t.start()
-		
 	for ex in langs:
-	
 		mod = importFromURI('lang/'+ex+'.py')
-		if mod is not None:
-			lang[ex] = {}
-			lang[ex] = mod.fn
-			comments[ex] = {}
-			comments[ex] = mod.comments
-		else:
+		if mod is None:
 			continue
-			
-		q.put((res, url, ex, skip, exclude_hidden))
-	q.join()
-	
+		lang[ex] = mod.fn
+		comments[ex] = mod.comments
+		doForAllLangs(res, url, ex, skip, exclude_hidden)
+
 	#XXX: only temporary
 	outputResult(os.path.join(url, 'dipdoc.json'), res)
 
