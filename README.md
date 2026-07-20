@@ -41,8 +41,8 @@ dipdoc <root-dir> [languages] [options]
 Examples:
 
 ```sh
-dipdoc ivartech js                 # -> ivartech/dipdoc.json (var dipdoc = ...)
-dipdoc ivartech js -f md -o docs.md
+dipdoc examples/ivartech js        # -> examples/ivartech/dipdoc.json (var dipdoc = ...)
+dipdoc examples/ivartech js -f md -o docs.md
 dipdoc tests js --test             # run the inline unit tests
 ```
 
