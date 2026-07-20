@@ -349,13 +349,12 @@ def doForAllLangs(res, url, ex, skip=[], exclude_hidden=True):
 
 	for root, dirs, files in os.walk(url):
 		if exclude_hidden:
-			for d in dirs:
-				if d.startswith('.'):
-					dirs.remove(d)
+			# slice-assign: mutating dirs in place prunes the walk, but
+			# removing during iteration skips elements
+			dirs[:] = [d for d in dirs if not d.startswith('.')]
 
 		if root in skip:
-			for d in dirs:
-				dirs.remove(d)
+			dirs[:] = []
 			continue
 		
 		for f in files:
