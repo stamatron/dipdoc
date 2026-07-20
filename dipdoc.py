@@ -200,7 +200,9 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 	eset = {'header':{}, 'content':[]}
 	reg_str = buildTagParsingRegexp(tags)
 	tag_re = re.compile(reg_str)
-	strip_re = re.compile("^"+decor+r"?\s?(?P<stripped>.*)")
+	# Group the decor so languages with no line decoration can pass decor=''
+	# (a bare '^?' is "nothing to repeat" on Python 3.11+).
+	strip_re = re.compile("^(?:"+decor+r")?\s?(?P<stripped>.*)")
 
 	flag = False
 	one_more = False
@@ -215,7 +217,10 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 		
 		stripped = line.strip()
 
-		start = re.match('^'+pref+'(.*)', stripped)
+		# Only look for a block-comment opener when not already inside one.
+		# Languages like Python use the same delimiter (""") to open and
+		# close; without this guard the closing line re-matches as a new open.
+		start = re.match('^'+pref+'(.*)', stripped) if not flag else None
 		if start is not None:
 			flag = True;
 			e = {}
