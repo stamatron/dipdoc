@@ -1,13 +1,11 @@
-#!/usr/bin/env python
-# DipDoc - JSDOC + Unit Tests
+#!/usr/bin/env python3
+# DipDoc - documentation + inline unit tests extracted in one pass.
 # Author: Nikola Stamatovic Stamat
-
-#TODO: MODULARIZE(multy language support) AND COMMENT! :P
-
-# $prepare var m1 = ivar.data.Map({something: lol})
-
-# assert can be equal stricEqual deepEqual or true with aditional operator not
-# $assert equal this(m1) params('hello', 1) result(true) Some message for information
+#
+# A comment block carries both docs (@ tags) and the unit test that proves
+# them ($ tags), e.g.:
+#   $prepare var m1 = ivar.data.Map({something: 1})
+#   $assert equal this(m1) params('hello', 1) result(true) optional message
 
 import sys
 import os
@@ -197,12 +195,12 @@ def buildTagParsingRegexp(l):
 		res.append('((?P<'+i['name']+'>'+i['pref']+r'[\w]+)(?P<'+i['name']+'_rest>.*))');
 	return '|'.join(res)
 
-#I know there is too many lines of code but it is fast if this is done in one iteration
+# Long, but deliberately single-pass: docs + code line parsed in one walk.
 def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', decor=r'\*', sing='//'):
 	eset = {'header':{}, 'content':[]}
 	reg_str = buildTagParsingRegexp(tags)
 	tag_re = re.compile(reg_str)
-	strip_re = re.compile("^"+decor+r"?\s?(?P<let_me_see_you_stripped>.*)")
+	strip_re = re.compile("^"+decor+r"?\s?(?P<stripped>.*)")
 
 	flag = False
 	one_more = False
@@ -245,7 +243,7 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 			
 			st = strip_re.match(stripped)
 			if st is not None:
-				stripped = st.group('let_me_see_you_stripped') #rammstein version
+				stripped = st.group('stripped')
 			else:
 				if start is not None:
 					stripped = start.group(1)

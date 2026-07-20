@@ -2,7 +2,7 @@ ivar.require('ivar.ui.navigation');
 
 ivar.ready(function() {
 ivar.ui.navigation.bindHashChange(function(m){
-	console.log(m.keys());//dial m for murder
+	console.log(m.keys());
 });
 
 var idx = {};
