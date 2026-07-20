@@ -217,10 +217,12 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 		
 		stripped = line.strip()
 
-		# Only look for a block-comment opener when not already inside one.
+		# Only look for a block-comment opener when not inside a comment body.
 		# Languages like Python use the same delimiter (""") to open and
 		# close; without this guard the closing line re-matches as a new open.
-		start = re.match('^'+pref+'(.*)', stripped) if not flag else None
+		# `one_more` is the code-line pass (the block already closed), where a
+		# fresh block may legitimately open, so allow the match there.
+		start = re.match('^'+pref+'(.*)', stripped) if (not flag or one_more) else None
 		if start is not None:
 			flag = True;
 			e = {}
@@ -293,7 +295,7 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 		#On last line, that usualy contains the function, class or field related to the documentation
 		if one_more:
 
-			if 'doc' in e and 'description' in e['doc']:
+			if e is not None and 'doc' in e and 'description' in e['doc']:
 				for i, el in enumerate(e['doc']['description']):
 					e['doc']['description'][i] = e['doc']['description'][i].strip('\n')
 				if 'excerpt' not in e['doc']:

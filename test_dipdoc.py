@@ -81,6 +81,19 @@ def test_js_extract():
     print('ok: js extraction')
 
 
+def test_back_to_back_blocks(tmp):
+    # An @file header block immediately followed by another doc block (no code
+    # line between) used to null the entry and crash on the next line. Must
+    # parse without raising, for any language, incl. same-delimiter ones.
+    src = tmp + '/b2b.py'
+    with open(src, 'w') as f:
+        f.write('"""\n@file mod\n"""\n'
+                '"""\n@description foo\n"""\n'
+                'def foo():\n    pass\n')
+    _parse(src, 'py')  # must not raise
+    print('ok: back-to-back blocks')
+
+
 def test_php_extract():
     ex = _load_lang('php').fn
     cases = [
@@ -235,6 +248,7 @@ if __name__ == '__main__':
         test_file_header_block(tmp)
         test_function_content(tmp)
         test_js_extract()
+        test_back_to_back_blocks(tmp)
         test_php_extract()
         test_php_content(tmp)
         test_py_extract()
