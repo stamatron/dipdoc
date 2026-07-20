@@ -21,3 +21,14 @@ $assert equal this(ctx) result(7) this-binding works
 """
 def get_value(self):
 	return self.value
+
+
+def mul(a, b):
+	"""
+	@description Multiplies; documented in-body (docstring style), not above.
+	@param {int} a first
+	@param {int} b second
+	$assert equal params(2, 3) result(6) two times three
+	$assert equal params(0, 5) result(0)
+	"""
+	return a * b

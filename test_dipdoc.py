@@ -163,6 +163,45 @@ def test_py_content(tmp):
     print('ok: py content')
 
 
+def test_py_content_inbody(tmp):
+    # Idiomatic docstring: the block sits *inside* the def/class body, so it
+    # documents the preceding declaration, not the line after the block.
+    src = tmp + '/inbody.py'
+    with open(src, 'w') as f:
+        f.write('def add(x, y):\n'
+                '\t"""\n'
+                '\t@description adds numbers\n'
+                '\t@param {int} x first\n'
+                '\t"""\n'
+                '\treturn x + y\n'
+                '\n'
+                'class Widget:\n'
+                '\t"""\n'
+                '\t@description a widget\n'
+                '\t"""\n'
+                '\tcount = 0\n'
+                '\n'
+                '\tdef draw(self):\n'
+                '\t\t"""\n'
+                '\t\t@description draws it\n'
+                '\t\t"""\n'
+                '\t\treturn True\n')
+    res = _parse(src, 'py')
+    by = {c.get('name'): c for c in res['content']}
+    assert 'add' in by and by['add'].get('type') == 'function', \
+        'in-body def not attached, got %r' % list(by)
+    assert by['add']['doc']['description'][-1] == 'adds numbers', \
+        'in-body doc mis-attached: %r' % by['add']['doc'].get('description')
+    assert 'Widget' in by and by['Widget'].get('type') == 'class', \
+        'in-body class docstring not attached, got %r' % list(by)
+    assert 'draw' in by and by['draw'].get('type') == 'function', \
+        'in-body method docstring not attached, got %r' % list(by)
+    # The field on the body line after the class docstring must NOT steal it.
+    assert by['Widget']['doc']['description'][-1] == 'a widget', \
+        'class docstring lost to following field: %r' % by['Widget']['doc'].get('description')
+    print('ok: py content in-body')
+
+
 def test_rb_extract():
     ex = _load_lang('rb').fn
     cases = [
@@ -233,7 +272,8 @@ def test_assert_execution_py():
     collector = {'py': {'data': {'fixture': res}}}
     passed, failed, tested = dipdoc.runAsserts(collector)
     assert tested == 1, 'expected 1 module tested, got %d' % tested
-    assert passed == 4 and failed == 0, 'py asserts: %d passed, %d failed' % (passed, failed)
+    # add(3) + get_value(1) + mul(2, documented in-body) = 6
+    assert passed == 6 and failed == 0, 'py asserts: %d passed, %d failed' % (passed, failed)
     print('ok: py assert execution')
 
 
@@ -318,6 +358,7 @@ if __name__ == '__main__':
         test_php_content(tmp)
         test_py_extract()
         test_py_content(tmp)
+        test_py_content_inbody(tmp)
         test_rb_extract()
         test_rb_content(tmp)
         test_parse_assert()
