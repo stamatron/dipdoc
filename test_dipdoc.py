@@ -16,11 +16,11 @@ def _load_lang(ext):
     spec.loader.exec_module(mod)
     dipdoc.lang[ext] = mod.fn
     dipdoc.comments[ext] = mod.comments
-    return mod.comments
+    return mod
 
 
 def _parse(path, ext='js'):
-    c = _load_lang(ext)
+    c = _load_lang(ext).comments
     return dipdoc.getCommentData(path, dipdoc.tags, dipdoc.decl, ext,
                                  c['pref'], c['suf'], c['decor'], c['single'])
 
@@ -56,9 +56,34 @@ def test_function_content(tmp):
     print('ok: function content')
 
 
+def test_js_extract():
+    ex = _load_lang('js').jsExtract
+    cases = [
+        ('function foo(x) {}',              'function', 'foo'),
+        ('async function bar() {}',         'function', 'bar'),
+        ('const baz = (a, b) => a + b;',    'function', 'baz'),
+        ('let qux = x => x;',               'function', 'qux'),
+        ('export function exported() {}',   'function', 'exported'),
+        ('export const arrowExp = () => 1', 'function', 'arrowExp'),
+        ('class Widget extends Base {',     'class',    'Widget'),
+        ('render: function() {}',           'function', 'render'),
+        ('Foo.prototype.bar = function()', 'function', 'bar'),
+        ('const N = 42;',                   'field',    'N'),
+        ('this.count = 0;',                 'field',    'count'),
+    ]
+    for line, typ, name in cases:
+        r = ex(line)
+        assert r is not None, 'no match for %r' % line
+        assert r['type'] == typ, '%r: type %r != %r' % (line, r['type'], typ)
+        assert r['name'] == name, '%r: name %r != %r' % (line, r['name'], name)
+    assert ex('a == b') is None, 'equality mis-parsed as assignment'
+    print('ok: js extraction')
+
+
 if __name__ == '__main__':
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         test_file_header_block(tmp)
         test_function_content(tmp)
+        test_js_extract()
     print('all passed')
