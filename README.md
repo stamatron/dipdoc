@@ -8,7 +8,9 @@ the same comment block.
 
 > Status: early / work in progress. Parser modules ship for JavaScript, PHP,
 > Python and Ruby; the JSON/Markdown extractors work, and the `$assert`
-> executor runs JavaScript tests (see [Limitations](#limitations)).
+> executor runs tests in each of those languages (see
+> [Running the tests](#running-the-inline-unit-tests) and
+> [Limitations](#limitations)).
 
 ## Install
 
@@ -36,8 +38,12 @@ dipdoc <root-dir> [languages] [options]
   for the browser reader; `json` is plain JSON; `md` renders Markdown.
 - `-o, --output PATH` — output file, or `-` for stdout. Defaults to
   `<root-dir>/dipdoc.<json|md>`.
-- `--test` — execute captured `$assert` blocks with Node and report pass/fail
-  (exits non-zero on failure). Requires `node` on `PATH`.
+- `--test` — execute captured `$assert` blocks in the module's own language and
+  report pass/fail (exits non-zero on failure). Needs that language's
+  interpreter (`node` / `python3` / `ruby` / `php`) on `PATH`.
+- `--bin LANG=PATH` — interpreter path for a language (repeatable), e.g.
+  `--bin py=/usr/bin/python3`. Also read from `DIPDOC_<LANG>_BIN` (e.g.
+  `DIPDOC_PHP_BIN`). Defaults to whatever is found on `PATH`.
 
 Examples:
 
@@ -68,8 +74,40 @@ $prepare  var m1 = ivar.data.Map({...})
 $assert   equal this(m1) params('hello', 1) result(true) message
 ```
 
+- **`$prepare`** is setup code run before the assertion, written in the module's
+  own language. It **can span multiple lines** — continuation lines (that don't
+  start a new tag) are appended to the current `$prepare`. Keep each line a flat
+  statement (leading indentation is stripped when the harness re-indents it).
+- **`$assert`** is a single logical line: `<op> [not] [this(recv)] [params(...)]
+  [result(expected)] [message]`, where `op` is `equal` / `strictEqual` /
+  `deepEqual` / `true`. It is **not** multiline — write one assertion per `$assert`.
+- `this(recv)` binds the receiver: JS calls `name.apply(recv, params)`; Python
+  and Ruby pass `recv` as the leading argument (`name(recv, ...)`, matching an
+  explicit `self` / receiver param); PHP calls `$recv->name(...)`.
+- `params(...)` and `result(...)` are copied verbatim, so write the literals in
+  the target language (`result(true)` in JS, `result(True)` in Python, etc.).
+
 A block containing `@file` is treated as the module header; other blocks are
 attached to the code line (function / field / dependency) that follows them.
+
+### Running the inline unit tests
+
+`dipdoc <root> <langs> --test` extracts every `$assert` and runs it **in the
+language of the module it came from** — no framework needed. Per language the
+tool writes a temporary program that loads the module source verbatim (PHP
+`require`s it), runs each assertion, and reports pass/fail:
+
+```sh
+dipdoc tests js --test                 # runs the JS fixture with node
+dipdoc tests py,rb --test              # Python + Ruby fixtures
+dipdoc src php --test --bin php=/usr/local/bin/php
+```
+
+Because the source is loaded verbatim, **the documented symbol must resolve at
+module top level** — this runs against self-contained modules and fixtures, not
+code that needs a framework runtime. A language whose interpreter isn't on
+`PATH` (and has no `--bin` / `DIPDOC_<LANG>_BIN` override) is skipped with a
+notice. See `tests/fixture.{js,py,rb}` for the shape.
 
 ## Languages
 
@@ -105,16 +143,30 @@ def add(x, y):
 python3 test_dipdoc.py
 ```
 
-Framework-free smoke tests: parsing, JS extraction, `$assert` parsing/execution
-(via Node, self-skipped if `node` is absent), and the Markdown emitter.
+Framework-free smoke tests: parsing, per-language extraction, `$assert`
+parsing and execution for JS / Python / Ruby (each self-skipped if its
+interpreter is absent), multiline `$prepare`, and the Markdown emitter.
+
+## Output structure
+
+`-f md` renders each module as: a header (description + `@author` / `@version` /
+`@licence`), a **Contents** sidebar, then sections. Functions and fields are
+grouped under a class when the block names it (`@this` / `@group` / `@class`, or
+an extractor-supplied parent such as `Foo.prototype.bar`); everything else is
+listed module-level under **Functions** / **Fields** / **Dependencies**. Classes
+are detected for all four languages (`class` in JS/PHP/Python/Ruby, plus PHP
+`interface`/`trait` and Ruby `module`); a source *file* is itself a module.
 
 ## Limitations
 
-- `$assert` execution is JavaScript-only (it runs the block with Node) and loads
-  the module source verbatim, so the documented symbol must resolve at module
-  top level. It runs against self-contained modules and fixtures, not code that
-  needs a framework runtime. PHP / Python / Ruby extract docs but their
-  `$assert` blocks are not executed.
+- `$assert` execution loads the module source verbatim (PHP `require`s it), so
+  the documented symbol must resolve at module top level. It runs against
+  self-contained modules and fixtures, not code that needs a framework runtime.
+  The built-in runners are simple in-language harnesses (assertion + try/catch),
+  not pytest / PHPUnit / minitest — those would be a follow-up.
+- Members only nest under their class when the block names the class (`@this` /
+  `@group` / a `parent`); the single-line extractor doesn't track lexical scope,
+  so a method written plainly inside a class body lists module-level.
 - Single-line declaration extraction: the parser inspects the one line after a
   comment, so multi-line signatures and a declaration hidden behind a decorator
   line (Python `@decorator`, PHP attributes) are not attached. The doc block
