@@ -512,22 +512,150 @@ function __check(label, fn){
 }
 '''
 
-# Execute captured $assert blocks with Node. The documented symbol must be
-# resolvable at module top level (the source file is loaded verbatim), so this
-# runs against self-contained modules / fixtures, not framework code that needs
-# a runtime. Returns (passed, failed, modules_tested).
-def runAsserts(collector):
+def _js_script(source, checks, uri):
+	body = '\n'.join(_checkBlock(*c) for c in checks)
+	return _HARNESS_HEAD + source + '\n' + body + \
+		'\nconsole.log(JSON.stringify(__results));\n'
+
+# --- Python / Ruby share the same shape: run the source verbatim, then a
+# try/except (begin/rescue) per assertion that records {label, ok, error}.
+# `this(recv)` binds the receiver by passing it as the leading argument
+# (self / the explicit receiver), so a documented `def f(self, ...)` /
+# `def f(obj, ...)` is exercised as `f(recv, ...)`.
+
+# $prepare lines are treated as flat, statement-level setup: each line is
+# left-stripped so it re-indents cleanly under the harness's try/begin block.
+# ponytail: no nested-indentation prepares; keep setup to single statements.
+def _flatLines(prepares):
+	out = []
+	for p in prepares:
+		out.extend(ln.strip() for ln in p.split('\n'))
+	return out
+
+def _freeCall(a, name):
+	args = (a.get('params') or '').strip()
+	recv = a.get('this')
+	if recv:
+		args = recv + (', ' + args if args else '')
+	return '%s(%s)' % (name, args)
+
+def _py_assert(a):
+	op = a.get('op')
+	neg = bool(a.get('not'))
+	if op == 'true':
+		return 'assert (not __actual)' if neg else 'assert __actual'
+	expected = a.get('result')
+	expected = expected if expected is not None else 'None'
+	return 'assert __actual %s %s' % ('!=' if neg else '==', expected)
+
+def _py_script(source, checks, uri):
+	parts = ['import json\n__results = []\n', source, '']
+	for label, a, name, prepares in checks:
+		block = ['try:']
+		block += ['\t' + ln for ln in _flatLines(prepares)]
+		block.append('\t__actual = %s' % _freeCall(a, name))
+		block.append('\t' + _py_assert(a))
+		block.append('\t__results.append({"label": %s, "ok": True})' % json.dumps(label))
+		block.append('except Exception as __e:')
+		block.append('\t__results.append({"label": %s, "ok": False, "error": str(__e)})' % json.dumps(label))
+		parts.append('\n'.join(block))
+	parts.append('print(json.dumps(__results))')
+	return '\n'.join(parts) + '\n'
+
+def _rb_assert(a):
+	op = a.get('op')
+	neg = bool(a.get('not'))
+	if op == 'true':
+		return 'raise "not truthy" unless %s__actual' % ('!' if neg else '')
+	expected = a.get('result')
+	expected = expected if expected is not None else 'nil'
+	return 'raise "got #{__actual.inspect}" unless __actual %s %s' % (
+		'!=' if neg else '==', expected)
+
+def _rb_script(source, checks, uri):
+	parts = ["require 'json'\n__results = []\n", source, '']
+	for label, a, name, prepares in checks:
+		block = ['begin']
+		block += ['\t' + ln for ln in _flatLines(prepares)]
+		block.append('\t__actual = %s' % _freeCall(a, name))
+		block.append('\t' + _rb_assert(a))
+		block.append('\t__results << {label: %s, ok: true}' % json.dumps(label))
+		block.append('rescue => __e')
+		block.append('\t__results << {label: %s, ok: false, error: __e.message}' % json.dumps(label))
+		block.append('end')
+		parts.append('\n'.join(block))
+	parts.append('puts __results.to_json')
+	return '\n'.join(parts) + '\n'
+
+# PHP source carries its own `<?php` tag, so require the file rather than
+# inlining it; the receiver binds as a method call `$recv->name(...)`.
+def _php_assert(a):
+	op = a.get('op')
+	neg = bool(a.get('not'))
+	if op == 'true':
+		return 'if (%s$__actual) {} else { throw new Exception("not truthy"); }' % (
+			'!' if neg else '')
+	cmp = {'equal': '==', 'strictEqual': '===', 'deepEqual': '=='}.get(op, '==')
+	if neg:
+		cmp = '!=' if cmp == '==' else '!=='
+	expected = a.get('result')
+	expected = expected if expected is not None else 'null'
+	return 'if ($__actual %s %s) {} else { throw new Exception("mismatch"); }' % (cmp, expected)
+
+def _php_script(source, checks, uri):
+	parts = ['<?php', '$__results = array();', 'require %s;' % json.dumps(uri)]
+	for label, a, name, prepares in checks:
+		recv = a.get('this')
+		args = (a.get('params') or '').strip()
+		call = '$%s->%s(%s)' % (recv, name, args) if recv else '%s(%s)' % (name, args)
+		block = ['try {']
+		block += ['\t' + ln for ln in _flatLines(prepares)]
+		block.append('\t$__actual = %s;' % call)
+		block.append('\t' + _php_assert(a))
+		block.append('\t$__results[] = array("label" => %s, "ok" => true);' % json.dumps(label))
+		block.append('} catch (Throwable $__e) {')
+		block.append('\t$__results[] = array("label" => %s, "ok" => false, "error" => $__e->getMessage());' % json.dumps(label))
+		block.append('}')
+		parts.append('\n'.join(block))
+	parts.append('echo json_encode($__results);')
+	return '\n'.join(parts) + '\n'
+
+# Per-language test runners. Adding a language = one entry (interpreter binary,
+# temp-file suffix, script builder). Each builder emits a self-contained program
+# that loads the module source, runs every captured $assert, and prints a JSON
+# array of {label, ok, error} on stdout.
+_RUNNERS = {
+	'js':  {'bin': 'node',    'suffix': '.js',  'script': _js_script},
+	'py':  {'bin': 'python3', 'suffix': '.py',  'script': _py_script},
+	'rb':  {'bin': 'ruby',    'suffix': '.rb',  'script': _rb_script},
+	'php': {'bin': 'php',     'suffix': '.php', 'script': _php_script},
+}
+
+# Execute captured $assert blocks in the module's own language. The documented
+# symbol must be resolvable at module top level (the source file is loaded
+# verbatim / required), so this runs against self-contained modules / fixtures,
+# not framework code that needs a runtime. `bins` maps a language to an
+# interpreter path, overriding the PATH lookup. Returns (passed, failed,
+# modules_tested).
+def runAsserts(collector, bins=None):
 	import subprocess
 	import tempfile
 	import shutil
 
-	node = shutil.which('node')
-	if node is None:
-		print('node not found on PATH; cannot execute $assert blocks')
-		return (0, 0, 0)
-
+	bins = bins or {}
 	passed = failed = tested = 0
 	for lang, container in collector.items():
+		runner = _RUNNERS.get(lang)
+		if runner is None:
+			print('no $assert runner for language %r; skipping' % lang)
+			continue
+		binpath = (bins.get(lang) or os.environ.get('DIPDOC_%s_BIN' % lang.upper())
+			or shutil.which(runner['bin']))
+		if binpath is None:
+			print('%s not found on PATH; cannot execute %s $assert blocks'
+				% (runner['bin'], lang))
+			continue
+
 		for mid, module in container.get('data', {}).items():
 			checks = []
 			for entry in module.get('content', []):
@@ -538,7 +666,7 @@ def runAsserts(collector):
 					continue
 				prepares = unit.get('prepare') or []
 				for j, a in enumerate(asserts):
-					checks.append(_checkBlock('%s::%s#%d' % (mid, name, j), a, name, prepares))
+					checks.append(('%s::%s#%d' % (mid, name, j), a, name, prepares))
 
 			uri = (module.get('header') or {}).get('uri')
 			if not checks or not uri or not os.path.exists(uri):
@@ -547,15 +675,14 @@ def runAsserts(collector):
 
 			with open(uri) as f:
 				source = f.read()
-			js = _HARNESS_HEAD + source + '\n' + '\n'.join(checks) + \
-				'\nconsole.log(JSON.stringify(__results));\n'
+			script = runner['script'](source, checks, os.path.abspath(uri))
 
 			path = None
 			try:
-				with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as tf:
-					tf.write(js)
+				with tempfile.NamedTemporaryFile('w', suffix=runner['suffix'], delete=False) as tf:
+					tf.write(script)
 					path = tf.name
-				proc = subprocess.run([node, path], capture_output=True,
+				proc = subprocess.run([binpath, path], capture_output=True,
 					text=True, timeout=30)
 			finally:
 				if path:
@@ -603,7 +730,10 @@ def main(argv=None):
 	p.add_argument('-f', '--format', choices=['json', 'js', 'md'], default='js',
 		help='json = plain JSON, js = "var dipdoc = {...}", md = Markdown (default: js)')
 	p.add_argument('--test', action='store_true',
-		help='execute captured $assert blocks with Node and report pass/fail')
+		help='execute captured $assert blocks in each language and report pass/fail')
+	p.add_argument('--bin', action='append', default=[], metavar='LANG=PATH',
+		help='interpreter path for a language, e.g. --bin py=/usr/bin/python3 '
+		'(also read from DIPDOC_<LANG>_BIN); default is found on PATH')
 	args = p.parse_args(argv)
 
 	if not os.path.isdir(args.root):
@@ -614,7 +744,12 @@ def main(argv=None):
 	res = run(args.root, langs, skip, exclude_hidden=not args.include_hidden)
 
 	if args.test:
-		passed, failed, tested = runAsserts(res)
+		bins = {}
+		for spec in args.bin:
+			k, _, v = spec.partition('=')
+			if v:
+				bins[k] = v
+		passed, failed, tested = runAsserts(res, bins)
 		sys.exit(1 if failed else 0)
 
 	if args.output is not None:

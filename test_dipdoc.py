@@ -224,6 +224,51 @@ def test_assert_execution():
     print('ok: assert execution')
 
 
+def test_assert_execution_py():
+    if shutil.which('python3') is None:
+        print('skip: python3 not on PATH')
+        return
+    res = _parse('tests/fixture.py', 'py')
+    res['header']['uri'] = 'tests/fixture.py'
+    collector = {'py': {'data': {'fixture': res}}}
+    passed, failed, tested = dipdoc.runAsserts(collector)
+    assert tested == 1, 'expected 1 module tested, got %d' % tested
+    assert passed == 4 and failed == 0, 'py asserts: %d passed, %d failed' % (passed, failed)
+    print('ok: py assert execution')
+
+
+def test_assert_execution_rb():
+    if shutil.which('ruby') is None:
+        print('skip: ruby not on PATH')
+        return
+    res = _parse('tests/fixture.rb', 'rb')
+    res['header']['uri'] = 'tests/fixture.rb'
+    collector = {'rb': {'data': {'fixture': res}}}
+    passed, failed, tested = dipdoc.runAsserts(collector)
+    assert tested == 1, 'expected 1 module tested, got %d' % tested
+    assert passed == 4 and failed == 0, 'rb asserts: %d passed, %d failed' % (passed, failed)
+    print('ok: rb assert execution')
+
+
+def test_multiline_prepare(tmp):
+    # $prepare spans lines: continuation lines (no tag) append to the prepare
+    # body. $assert is one logical line by design.
+    src = tmp + '/mp.js'
+    with open(src, 'w') as f:
+        f.write('/**\n'
+                ' * @description exercises a multiline prepare\n'
+                ' * $prepare var ctx = {\n'
+                ' *   value: 7\n'
+                ' * };\n'
+                ' * $assert equal this(ctx) result(7)\n'
+                ' */\n'
+                'function getV() { return this.value; }\n')
+    res = _parse(src)
+    prep = res['content'][0]['unit']['prepare']
+    assert any('value: 7' in p for p in prep), 'multiline prepare lost: %r' % prep
+    print('ok: multiline prepare')
+
+
 def test_emit_markdown(tmp):
     src = tmp + '/md.js'
     with open(src, 'w') as f:
@@ -257,5 +302,8 @@ if __name__ == '__main__':
         test_rb_content(tmp)
         test_parse_assert()
         test_assert_execution()
+        test_assert_execution_py()
+        test_assert_execution_rb()
+        test_multiline_prepare(tmp)
         test_emit_markdown(tmp)
     print('all passed')
