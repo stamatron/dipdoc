@@ -81,6 +81,112 @@ def test_js_extract():
     print('ok: js extraction')
 
 
+def test_php_extract():
+    ex = _load_lang('php').fn
+    cases = [
+        ('class Foo extends Bar {',            'class',      'Foo'),
+        ('interface Shape {',                  'class',      'Shape'),
+        ('public function doThing($x) {',      'function',   'doThing'),
+        ('private static function helper() {', 'function',   'helper'),
+        ('require_once "lib.php";',            'dependency', 'lib.php'),
+        ('const MAX = 10;',                    'field',      'MAX'),
+        ('protected $count = 0;',              'field',      'count'),
+    ]
+    for line, typ, name in cases:
+        r = ex(line)
+        assert r is not None, 'no match for %r' % line
+        assert r['type'] == typ and r['name'] == name, \
+            '%r: got %r/%r' % (line, r.get('type'), r.get('name'))
+    assert ex('$this->x == $y') is None, 'equality mis-parsed'
+    print('ok: php extraction')
+
+
+def test_php_content(tmp):
+    src = tmp + '/x.php'
+    with open(src, 'w') as f:
+        f.write('/**\n'
+                ' * @description adds numbers\n'
+                ' * @param {int} x first\n'
+                ' */\n'
+                'function add($x, $y) {}\n')
+    res = _parse(src, 'php')
+    assert 'add' in [c.get('name') for c in res['content']], 'php fn not extracted'
+    print('ok: php content')
+
+
+def test_py_extract():
+    ex = _load_lang('py').fn
+    cases = [
+        ('class Foo(Base):',        'class',      'Foo'),
+        ('def thing(x):',           'function',   'thing'),
+        ('async def fetch(url):',   'function',   'fetch'),
+        ('from os import path',     'dependency', 'os'),
+        ('import json',             'dependency', 'json'),
+        ('MAX = 10',                'field',      'MAX'),
+        ('total: int = 0',          'field',      'total'),
+    ]
+    for line, typ, name in cases:
+        r = ex(line)
+        assert r is not None, 'no match for %r' % line
+        assert r['type'] == typ and r['name'] == name, \
+            '%r: got %r/%r' % (line, r.get('type'), r.get('name'))
+    assert ex('a == b') is None, 'equality mis-parsed'
+    print('ok: py extraction')
+
+
+def test_py_content(tmp):
+    # Doc block precedes the declaration; triple-quote opens and closes it.
+    src = tmp + '/x.py'
+    with open(src, 'w') as f:
+        f.write('"""\n'
+                '@description adds numbers\n'
+                '@param {int} x first\n'
+                '"""\n'
+                'def add(x, y):\n'
+                '    return x + y\n')
+    res = _parse(src, 'py')
+    names = [c.get('name') for c in res['content']]
+    assert 'add' in names, 'py fn not extracted, got %r' % names
+    print('ok: py content')
+
+
+def test_rb_extract():
+    ex = _load_lang('rb').fn
+    cases = [
+        ('class Foo < Bar',              'class',      'Foo'),
+        ('module Helpers',               'class',      'Helpers'),
+        ('def thing(x)',                 'function',   'thing'),
+        ('def self.build',              'function',   'build'),
+        ('def valid?',                   'function',   'valid?'),
+        ("require 'json'",               'dependency', 'json'),
+        ('attr_accessor :count, :name', 'field',      'count'),
+        ('MAX = 10',                     'field',      'MAX'),
+    ]
+    for line, typ, name in cases:
+        r = ex(line)
+        assert r is not None, 'no match for %r' % line
+        assert r['type'] == typ and r['name'] == name, \
+            '%r: got %r/%r' % (line, r.get('type'), r.get('name'))
+    assert ex('a == b') is None, 'equality mis-parsed'
+    print('ok: rb extraction')
+
+
+def test_rb_content(tmp):
+    src = tmp + '/x.rb'
+    with open(src, 'w') as f:
+        f.write('=begin\n'
+                '@description adds numbers\n'
+                '@param {Integer} x first\n'
+                '=end\n'
+                'def add(x, y)\n'
+                '  x + y\n'
+                'end\n')
+    res = _parse(src, 'rb')
+    names = [c.get('name') for c in res['content']]
+    assert 'add' in names, 'rb fn not extracted, got %r' % names
+    print('ok: rb content')
+
+
 def test_parse_assert():
     a = dipdoc.parseAssert('equal this(ctx) params(2, 3) result(5) two plus three')
     assert a['op'] == 'equal' and not a['not']
@@ -129,6 +235,12 @@ if __name__ == '__main__':
         test_file_header_block(tmp)
         test_function_content(tmp)
         test_js_extract()
+        test_php_extract()
+        test_php_content(tmp)
+        test_py_extract()
+        test_py_content(tmp)
+        test_rb_extract()
+        test_rb_content(tmp)
         test_parse_assert()
         test_assert_execution()
         test_emit_markdown(tmp)
