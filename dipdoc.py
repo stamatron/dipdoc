@@ -783,29 +783,190 @@ _RUNNERS = {
 	'php': {'bin': 'php',     'suffix': '.php', 'script': _php_script},
 }
 
+# --- Optional framework runners -------------------------------------------
+# Same idea, but each `$assert` runs as a real test case in a xUnit framework
+# (pytest / minitest / PHPUnit) instead of the built-in in-language harness, so
+# assertion failures carry the framework's own diagnostics. Selected per language
+# with `--runner LANG=FRAMEWORK` (or `DIPDOC_<LANG>_RUNNER`); the built-in harness
+# stays the default. A framework runner either provides a `script` (prints the
+# same JSON as the built-in path) or a `run(binpath, source, checks, uri)` that
+# owns execution and returns the results list — or None to signal "framework not
+# available here, skip this module".
+
+def _junit_results(xml_path, labels):
+	"""Map a JUnit XML report (pytest / PHPUnit) to [{label, ok, error}].
+	`labels` maps generated test-method name -> the dipdoc assert label."""
+	import xml.etree.ElementTree as ET
+	results = []
+	for tc in ET.parse(xml_path).iter('testcase'):
+		label = labels.get(tc.get('name'))
+		if label is None:
+			continue
+		bad = tc.find('failure')
+		if bad is None:
+			bad = tc.find('error')
+		ok = bad is None
+		msg = None
+		if not ok:
+			msg = (bad.get('message') or '').strip() or (
+				((bad.text or '').strip().splitlines() or ['failed'])[0])
+		results.append({'label': label, 'ok': ok, 'error': msg})
+	return results
+
+def _pytest_run(binpath, source, checks, uri):
+	import subprocess, tempfile, shutil as _sh
+	# pytest must be importable by this interpreter; if not, skip (None).
+	if subprocess.run([binpath, '-c', 'import pytest'],
+			capture_output=True, text=True).returncode != 0:
+		return None
+	labels = {}
+	parts = [source, '']
+	for i, (label, a, name, prepares) in enumerate(checks):
+		fn = 'test_%d' % i
+		labels[fn] = label
+		block = ['def %s():' % fn]
+		block += ['\t' + ln for ln in _flatLines(prepares)]
+		block.append('\t__actual = %s' % _freeCall(a, name))
+		block.append('\t' + _py_assert(a))  # bare assert → pytest introspection
+		parts.append('\n'.join(block))
+	d = tempfile.mkdtemp()
+	try:
+		tf = os.path.join(d, 'test_dipdoc_gen.py')
+		xml = os.path.join(d, 'report.xml')
+		with open(tf, 'w') as f:
+			f.write('\n'.join(parts) + '\n')
+		subprocess.run([binpath, '-m', 'pytest', tf, '--junitxml=' + xml,
+			'-q', '-p', 'no:cacheprovider'],
+			capture_output=True, text=True, timeout=60, cwd=d)
+		return _junit_results(xml, labels) if os.path.exists(xml) else None
+	finally:
+		_sh.rmtree(d, ignore_errors=True)
+
+def _mt_assert(a):
+	op = a.get('op')
+	neg = bool(a.get('not'))
+	if op == 'true':
+		return 'refute __actual' if neg else 'assert __actual'
+	expected = a.get('result')
+	expected = expected if expected is not None else 'nil'
+	return ('refute_equal %s, __actual' if neg else 'assert_equal %s, __actual') % expected
+
+# minitest ships with Ruby's stdlib, so this needs no extra gem. `require
+# 'minitest'` (not autorun) so nothing runs at exit — we drive each method with
+# Minitest.run_one_method and print the same JSON the built-in path emits.
+def _minitest_script(source, checks, uri):
+	labels = {}
+	parts = ["require 'minitest'", "require 'json'", source, '',
+		'class DipTest < Minitest::Test']
+	for i, (label, a, name, prepares) in enumerate(checks):
+		m = 'test_%d' % i
+		labels[m] = label
+		block = ['\tdef %s' % m]
+		block += ['\t\t' + ln for ln in _flatLines(prepares)]
+		block.append('\t\t__actual = %s' % _freeCall(a, name))
+		block.append('\t\t' + _mt_assert(a))
+		block.append('\tend')
+		parts.append('\n'.join(block))
+	parts.append('end')
+	# double-encode so the JSON object is a valid Ruby string literal → string keys.
+	parts.append('__labels = JSON.parse(%s)' % json.dumps(json.dumps(labels)))
+	parts.append('__results = []')
+	parts.append('__labels.each_key do |m|')
+	parts.append('\tres = Minitest.run_one_method(DipTest, m)')
+	parts.append('\tok = res.passed?')
+	parts.append('\terr = ok ? nil : (res.failures.map { |f| f.message }.first)')
+	parts.append('\t__results << {"label" => __labels[m], "ok" => ok, "error" => err}')
+	parts.append('end')
+	parts.append('puts JSON.generate(__results)')
+	return '\n'.join(parts) + '\n'
+
+def _phpunit_assert(a):
+	op = a.get('op')
+	neg = bool(a.get('not'))
+	if op == 'true':
+		return ('$this->assertFalse((bool)$__actual);' if neg
+			else '$this->assertTrue((bool)$__actual);')
+	expected = a.get('result')
+	expected = expected if expected is not None else 'null'
+	if op == 'strictEqual':
+		m = 'assertNotSame' if neg else 'assertSame'
+	else:
+		m = 'assertNotEquals' if neg else 'assertEquals'
+	return '$this->%s(%s, $__actual);' % (m, expected)
+
+# ponytail: PHPUnit runner is untested here (no php/phpunit on this machine) —
+#   it self-skips (bin lookup fails). The harness mirrors the pytest one (JUnit
+#   report → _junit_results); verify against a real phpunit before relying on it.
+def _phpunit_run(binpath, source, checks, uri):
+	import subprocess, tempfile, shutil as _sh
+	labels = {}
+	methods = []
+	for i, (label, a, name, prepares) in enumerate(checks):
+		m = 'test_%d' % i
+		labels[m] = label
+		recv = a.get('this')
+		args = (a.get('params') or '').strip()
+		call = '$%s->%s(%s)' % (recv, name, args) if recv else '%s(%s)' % (name, args)
+		body = ['\tpublic function %s() {' % m]
+		body += ['\t\t' + ln for ln in _flatLines(prepares)]
+		body.append('\t\t$__actual = %s;' % call)
+		body.append('\t\t' + _phpunit_assert(a))
+		body.append('\t}')
+		methods.append('\n'.join(body))
+	prog = ('<?php\nuse PHPUnit\\Framework\\TestCase;\nrequire %s;\n'
+		% json.dumps(os.path.abspath(uri))
+		+ 'class DipTest extends TestCase {\n' + '\n'.join(methods) + '\n}\n')
+	d = tempfile.mkdtemp()
+	try:
+		tf = os.path.join(d, 'DipTest.php')
+		xml = os.path.join(d, 'report.xml')
+		with open(tf, 'w') as f:
+			f.write(prog)
+		subprocess.run([binpath, '--log-junit', xml, tf],
+			capture_output=True, text=True, timeout=60, cwd=d)
+		return _junit_results(xml, labels) if os.path.exists(xml) else None
+	finally:
+		_sh.rmtree(d, ignore_errors=True)
+
+_FRAMEWORK_RUNNERS = {
+	('py', 'pytest'):    {'bin': 'python3', 'run': _pytest_run},
+	('rb', 'minitest'):  {'bin': 'ruby', 'suffix': '.rb', 'script': _minitest_script},
+	('php', 'phpunit'):  {'bin': 'phpunit', 'run': _phpunit_run},
+}
+
 # Execute captured $assert blocks in the module's own language. The documented
 # symbol must be resolvable at module top level (the source file is loaded
 # verbatim / required), so this runs against self-contained modules / fixtures,
 # not framework code that needs a runtime. `bins` maps a language to an
 # interpreter path, overriding the PATH lookup. Returns (passed, failed,
 # modules_tested).
-def runAsserts(collector, bins=None):
+def runAsserts(collector, bins=None, runners=None):
 	import subprocess
 	import tempfile
 	import shutil
 
 	bins = bins or {}
+	runners = runners or {}
 	passed = failed = tested = 0
 	for lang, container in collector.items():
-		runner = _RUNNERS.get(lang)
+		# A framework runner (pytest/minitest/phpunit) if one is selected for this
+		# language, else the built-in in-language harness.
+		fw = runners.get(lang) or os.environ.get('DIPDOC_%s_RUNNER' % lang.upper())
+		if fw:
+			runner = _FRAMEWORK_RUNNERS.get((lang, fw))
+			if runner is None:
+				print('no %r runner for language %r; using built-in' % (fw, lang))
+				runner = _RUNNERS.get(lang)
+		else:
+			runner = _RUNNERS.get(lang)
 		if runner is None:
 			print('no $assert runner for language %r; skipping' % lang)
 			continue
 		binpath = (bins.get(lang) or os.environ.get('DIPDOC_%s_BIN' % lang.upper())
 			or shutil.which(runner['bin']))
 		if binpath is None:
-			print('%s not found on PATH; cannot execute %s $assert blocks'
-				% (runner['bin'], lang))
+			print('%s not found on PATH; cannot execute %s $assert blocks%s'
+				% (runner['bin'], lang, ' (%s runner)' % fw if fw else ''))
 			continue
 
 		for mid, module in container.get('data', {}).items():
@@ -832,36 +993,47 @@ def runAsserts(collector, bins=None):
 
 			with open(uri) as f:
 				source = f.read()
-			script = runner['script'](source, checks, os.path.abspath(uri))
 
-			path = None
-			try:
-				with tempfile.NamedTemporaryFile('w', suffix=runner['suffix'], delete=False) as tf:
-					tf.write(script)
-					path = tf.name
-				proc = subprocess.run([binpath, path], capture_output=True,
-					text=True, timeout=30)
-			finally:
-				if path:
-					os.unlink(path)
+			# Framework runners own their execution (temp files, subprocess, report
+			# parsing) and return the results list, or None to skip (framework not
+			# installed here). The built-in path runs a self-contained script that
+			# prints the results as JSON.
+			if 'run' in runner:
+				results = runner['run'](binpath, source, checks, os.path.abspath(uri))
+				if results is None:
+					tested -= 1
+					print('  skip %s: %s runner unavailable' % (mid, fw))
+					continue
+			else:
+				script = runner['script'](source, checks, os.path.abspath(uri))
+				path = None
+				try:
+					with tempfile.NamedTemporaryFile('w', suffix=runner['suffix'], delete=False) as tf:
+						tf.write(script)
+						path = tf.name
+					proc = subprocess.run([binpath, path], capture_output=True,
+						text=True, timeout=30)
+				finally:
+					if path:
+						os.unlink(path)
 
-			out = proc.stdout.strip().splitlines()
-			if proc.returncode != 0 and not out:
-				tail = proc.stderr.strip().splitlines()
-				err = tail[-1] if tail else 'exit %d' % proc.returncode
-				print('  FAIL %s (load): %s' % (mid, err))
-				# Whole module failed to load: mark every assert as errored.
-				for a in by_label.values():
-					a['ok'] = False
-					a['error'] = 'load error: ' + err
-				failed += 1
-				continue
-			try:
-				results = json.loads(out[-1])
-			except Exception:
-				print('  FAIL %s: could not read test results' % mid)
-				failed += 1
-				continue
+				out = proc.stdout.strip().splitlines()
+				if proc.returncode != 0 and not out:
+					tail = proc.stderr.strip().splitlines()
+					err = tail[-1] if tail else 'exit %d' % proc.returncode
+					print('  FAIL %s (load): %s' % (mid, err))
+					# Whole module failed to load: mark every assert as errored.
+					for a in by_label.values():
+						a['ok'] = False
+						a['error'] = 'load error: ' + err
+					failed += 1
+					continue
+				try:
+					results = json.loads(out[-1])
+				except Exception:
+					print('  FAIL %s: could not read test results' % mid)
+					failed += 1
+					continue
 			for r in results:
 				a = by_label.get(r.get('label'))
 				if a is not None:  # bake the result onto the assert for the reader
@@ -900,6 +1072,10 @@ def main(argv=None):
 	p.add_argument('--bin', action='append', default=[], metavar='LANG=PATH',
 		help='interpreter path for a language, e.g. --bin py=/usr/bin/python3 '
 		'(also read from DIPDOC_<LANG>_BIN); default is found on PATH')
+	p.add_argument('--runner', action='append', default=[], metavar='LANG=FRAMEWORK',
+		help='run $assert blocks with a test framework instead of the built-in '
+		'harness, e.g. --runner py=pytest (rb=minitest, php=phpunit; also read '
+		'from DIPDOC_<LANG>_RUNNER)')
 	args = p.parse_args(argv)
 
 	if not os.path.isdir(args.root):
@@ -916,9 +1092,14 @@ def main(argv=None):
 			k, _, v = spec.partition('=')
 			if v:
 				bins[k] = v
+		runners = {}
+		for spec in args.runner:
+			k, _, v = spec.partition('=')
+			if v:
+				runners[k] = v
 		# runAsserts bakes each assert's pass/fail back into `res`, so the
 		# output written below carries the results for the browser reader.
-		_, failed, _ = runAsserts(res, bins)
+		_, failed, _ = runAsserts(res, bins, runners)
 
 	if args.output is not None:
 		out = args.output

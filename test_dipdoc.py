@@ -290,6 +290,45 @@ def test_assert_execution_rb():
     print('ok: rb assert execution')
 
 
+def test_runner_minitest():
+    # --runner rb=minitest runs each $assert as a real minitest test case
+    # (minitest ships with Ruby's stdlib), producing the same pass/fail.
+    if shutil.which('ruby') is None:
+        print('skip: ruby not on PATH')
+        return
+    res = _parse('tests/fixture.rb', 'rb')
+    res['header']['uri'] = 'tests/fixture.rb'
+    collector = {'rb': {'data': {'fixture': res}}}
+    passed, failed, tested = dipdoc.runAsserts(collector, None, {'rb': 'minitest'})
+    assert tested == 1, 'minitest: expected 1 module tested, got %d' % tested
+    assert passed == 4 and failed == 0, 'minitest asserts: %d passed, %d failed' % (passed, failed)
+    print('ok: minitest runner')
+
+
+def test_runner_pytest():
+    # --runner py=pytest runs each $assert as a pytest test case. pytest is an
+    # optional dependency: when it isn't installed the runner self-skips (module
+    # not counted), so this test accepts either outcome.
+    import subprocess
+    if shutil.which('python3') is None:
+        print('skip: python3 not on PATH')
+        return
+    have_pytest = subprocess.run(['python3', '-c', 'import pytest'],
+                                 capture_output=True).returncode == 0
+    res = _parse('tests/fixture.py', 'py')
+    res['header']['uri'] = 'tests/fixture.py'
+    collector = {'py': {'data': {'fixture': res}}}
+    passed, failed, tested = dipdoc.runAsserts(collector, None, {'py': 'pytest'})
+    if not have_pytest:
+        assert tested == 0 and passed == 0, 'pytest absent should skip: %r' % (
+            (passed, failed, tested),)
+        print('ok: pytest runner (self-skipped, pytest not installed)')
+        return
+    assert tested == 1, 'pytest: expected 1 module tested, got %d' % tested
+    assert passed == 6 and failed == 0, 'pytest asserts: %d passed, %d failed' % (passed, failed)
+    print('ok: pytest runner')
+
+
 def test_multiline_prepare(tmp):
     # $prepare spans lines: continuation lines (no tag) append to the prepare
     # body. $assert is one logical line by design.
@@ -445,6 +484,8 @@ if __name__ == '__main__':
         test_assert_execution()
         test_assert_execution_py()
         test_assert_execution_rb()
+        test_runner_minitest()
+        test_runner_pytest()
         test_multiline_prepare(tmp)
         test_multiline_assert(tmp)
         test_multiline_assert_message(tmp)
