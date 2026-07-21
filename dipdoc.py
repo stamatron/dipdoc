@@ -300,6 +300,18 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 				if res is not None:
 					e[tp][tag_name].append(res)
 
+			# Multiline $assert: a continuation line (no tag of its own) joins the
+			# previous assert into one logical line and re-parses it, so a long
+			# params(...)/message can wrap. Space-join keeps it single-logical-line
+			# (params balance across the wrap); newlines in messages are lost.
+			# ponytail: space-join + reparse, upgrade to newline-preserving only if
+			#   someone actually needs multi-line assert messages.
+			elif tp == 'unit' and tag_name == 'assert' and e[tp].get('assert') \
+					and isinstance(e[tp]['assert'][-1], dict) and stripped.strip():
+					prev = e[tp]['assert'][-1]
+					raw = (prev.get('raw', '') + ' ' + stripped.strip()).strip()
+					e[tp]['assert'][-1] = parseAssert(raw)
+
 			else:
 				if tag_name in decl[tp]:
 					stripped = decl[tp][tag_name](stripped)

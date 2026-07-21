@@ -309,6 +309,26 @@ def test_multiline_prepare(tmp):
     print('ok: multiline prepare')
 
 
+def test_multiline_assert(tmp):
+    # A $assert wrapped across lines joins into one logical assertion and
+    # re-parses: the params balance across the wrap, the message survives.
+    src = tmp + '/ma.js'
+    with open(src, 'w') as f:
+        f.write('/**\n'
+                ' * @description wrapped assert\n'
+                ' * $assert equal params(2,\n'
+                ' *   3) result(5)\n'
+                ' *   two plus three\n'
+                ' */\n'
+                'function add(a, b) { return a + b; }\n')
+    res = _parse(src)
+    a = res['content'][0]['unit']['assert'][0]
+    assert a['params'] == '2, 3', 'wrapped params lost: %r' % a['params']
+    assert a['result'] == '5', 'wrapped result lost: %r' % a['result']
+    assert a['message'] == 'two plus three', 'wrapped message lost: %r' % a['message']
+    print('ok: multiline assert')
+
+
 def test_emit_markdown(tmp):
     src = tmp + '/md.js'
     with open(src, 'w') as f:
@@ -366,6 +386,7 @@ if __name__ == '__main__':
         test_assert_execution_py()
         test_assert_execution_rb()
         test_multiline_prepare(tmp)
+        test_multiline_assert(tmp)
         test_emit_markdown(tmp)
         test_emit_markdown_classes(tmp)
     print('all passed')
