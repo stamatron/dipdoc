@@ -508,7 +508,11 @@ def _emitEntry(out, entry, level):
 				' {%s}' % t if t else '', ret.get('description', '')))
 	for a in (entry.get('unit') or {}).get('assert') or []:
 		if isinstance(a, dict):
-			out.append('- _assert_: `%s`' % a.get('raw', ''))
+			# Show the baked pass/fail (from `--test`) when present.
+			mark = ''
+			if 'ok' in a:
+				mark = ' ✅' if a.get('ok') else ' ❌ %s' % (a.get('error') or '')
+			out.append('- _assert_: `%s`%s' % (a.get('raw', ''), mark))
 
 def emitMarkdown(collector):
 	"""Render the collector as Markdown: a per-module header, a Contents
@@ -795,6 +799,9 @@ def runAsserts(collector, bins=None):
 
 		for mid, module in container.get('data', {}).items():
 			checks = []
+			# label -> the assert dict in the collector, so results can be
+			# written back onto it (baked into the output for the reader).
+			by_label = {}
 			for entry in module.get('content', []):
 				unit = entry.get('unit') or {}
 				asserts = [a for a in (unit.get('assert') or []) if isinstance(a, dict)]
@@ -803,7 +810,9 @@ def runAsserts(collector, bins=None):
 					continue
 				prepares = unit.get('prepare') or []
 				for j, a in enumerate(asserts):
-					checks.append(('%s::%s#%d' % (mid, name, j), a, name, prepares))
+					label = '%s::%s#%d' % (mid, name, j)
+					checks.append((label, a, name, prepares))
+					by_label[label] = a
 
 			uri = (module.get('header') or {}).get('uri')
 			if not checks or not uri or not os.path.exists(uri):
@@ -828,7 +837,12 @@ def runAsserts(collector, bins=None):
 			out = proc.stdout.strip().splitlines()
 			if proc.returncode != 0 and not out:
 				tail = proc.stderr.strip().splitlines()
-				print('  FAIL %s (load): %s' % (mid, tail[-1] if tail else 'exit %d' % proc.returncode))
+				err = tail[-1] if tail else 'exit %d' % proc.returncode
+				print('  FAIL %s (load): %s' % (mid, err))
+				# Whole module failed to load: mark every assert as errored.
+				for a in by_label.values():
+					a['ok'] = False
+					a['error'] = 'load error: ' + err
 				failed += 1
 				continue
 			try:
@@ -838,6 +852,10 @@ def runAsserts(collector, bins=None):
 				failed += 1
 				continue
 			for r in results:
+				a = by_label.get(r.get('label'))
+				if a is not None:  # bake the result onto the assert for the reader
+					a['ok'] = bool(r.get('ok'))
+					a['error'] = None if r.get('ok') else r.get('error')
 				if r.get('ok'):
 					passed += 1
 					print('  PASS %s' % r['label'])
@@ -880,14 +898,16 @@ def main(argv=None):
 	skip = [x for x in args.skip.split(',') if x]
 	res = run(args.root, langs, skip, exclude_hidden=not args.include_hidden)
 
+	failed = 0
 	if args.test:
 		bins = {}
 		for spec in args.bin:
 			k, _, v = spec.partition('=')
 			if v:
 				bins[k] = v
-		passed, failed, tested = runAsserts(res, bins)
-		sys.exit(1 if failed else 0)
+		# runAsserts bakes each assert's pass/fail back into `res`, so the
+		# output written below carries the results for the browser reader.
+		_, failed, _ = runAsserts(res, bins)
 
 	if args.output is not None:
 		out = args.output
@@ -895,6 +915,9 @@ def main(argv=None):
 		ext = 'md' if args.format == 'md' else 'json'
 		out = os.path.join(args.root, 'dipdoc.' + ext)
 	outputResult(res, out, args.format)
+
+	if args.test:
+		sys.exit(1 if failed else 0)
 
 if __name__ == "__main__":
 	main()
