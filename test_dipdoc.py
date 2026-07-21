@@ -329,6 +329,46 @@ def test_multiline_assert(tmp):
     print('ok: multiline assert')
 
 
+def test_baked_assert_results(tmp):
+    # --test bakes each assert's pass/fail onto the assert dict in the collector
+    # (so the js/json/md output carries it for the browser reader).
+    if shutil.which('node') is None:
+        print('skip: node not on PATH')
+        return
+    res = _parse('tests/fixture.js')
+    res['header']['uri'] = 'tests/fixture.js'
+    collector = {'js': {'data': {'fixture': res}}}
+    dipdoc.runAsserts(collector)
+    asserts = {}
+    for e in res['content']:
+        for a in (e.get('unit') or {}).get('assert') or []:
+            asserts[a.get('raw')] = a
+    good = asserts['equal params(2, 3) result(5) two plus three']
+    bad = asserts['equal params() result(999) intentionally wrong, must FAIL']
+    assert good['ok'] is True and good['error'] is None, 'good assert not baked: %r' % good
+    assert bad['ok'] is False and bad['error'], 'bad assert not baked: %r' % bad
+    print('ok: baked assert results')
+
+
+def test_reader_renders(tmp):
+    # End-to-end: generate the js output and render it through dipdoc_reader.js
+    # under a headless DOM shim; asserts the reader shows pass/fail.
+    if shutil.which('node') is None:
+        print('skip: node not on PATH')
+        return
+    import subprocess
+    res = _parse('tests/fixture.js')
+    res['header']['uri'] = 'tests/fixture.js'
+    collector = {'js': {'data': {'fixture': res}}}
+    dipdoc.runAsserts(collector)
+    out = tmp + '/dipdoc.json'
+    dipdoc.outputResult(collector, out, 'js')
+    r = subprocess.run(['node', 'tests/reader_smoke.js', out],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, 'reader smoke failed: %s%s' % (r.stdout, r.stderr)
+    print('ok: reader renders')
+
+
 def test_emit_markdown(tmp):
     src = tmp + '/md.js'
     with open(src, 'w') as f:
@@ -387,6 +427,8 @@ if __name__ == '__main__':
         test_assert_execution_rb()
         test_multiline_prepare(tmp)
         test_multiline_assert(tmp)
+        test_baked_assert_results(tmp)
+        test_reader_renders(tmp)
         test_emit_markdown(tmp)
         test_emit_markdown_classes(tmp)
     print('all passed')

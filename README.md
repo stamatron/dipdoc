@@ -78,9 +78,12 @@ $assert   equal this(m1) params('hello', 1) result(true) message
   own language. It **can span multiple lines** — continuation lines (that don't
   start a new tag) are appended to the current `$prepare`. Keep each line a flat
   statement (leading indentation is stripped when the harness re-indents it).
-- **`$assert`** is a single logical line: `<op> [not] [this(recv)] [params(...)]
+- **`$assert`** is one logical assertion: `<op> [not] [this(recv)] [params(...)]
   [result(expected)] [message]`, where `op` is `equal` / `strictEqual` /
-  `deepEqual` / `true`. It is **not** multiline — write one assertion per `$assert`.
+  `deepEqual` / `true`. It **may wrap across lines** — continuation lines (that
+  don't start a new tag) are joined back into the one assertion and re-parsed, so
+  a long `params(...)` or message can span lines. Still one assertion per
+  `$assert`; write a new `$assert` for the next one.
 - `this(recv)` binds the receiver: JS calls `name.apply(recv, params)`; Python
   and Ruby pass `recv` as the leading argument (`name(recv, ...)`, matching an
   explicit `self` / receiver param); PHP calls `$recv->name(...)`.
@@ -108,6 +111,15 @@ module top level** — this runs against self-contained modules and fixtures, no
 code that needs a framework runtime. A language whose interpreter isn't on
 `PATH` (and has no `--bin` / `DIPDOC_<LANG>_BIN` override) is skipped with a
 notice. See `tests/fixture.{js,py,rb}` for the shape.
+
+`--test` also **bakes each assertion's result** (`ok` / `error`) back into the
+generated output, so combining it with `-o` / `-f` carries pass/fail into the
+JSON, Markdown, and browser reader — one command produces docs *and* their proof:
+
+```sh
+dipdoc tests js --test -o dipdoc.json -f js   # data + baked pass/fail for the reader
+dipdoc tests js --test -f md -o docs.md       # Markdown with ✅ / ❌ per assert
+```
 
 ## Languages
 
@@ -159,7 +171,9 @@ python3 test_dipdoc.py
 
 Framework-free smoke tests: parsing, per-language extraction, `$assert`
 parsing and execution for JS / Python / Ruby (each self-skipped if its
-interpreter is absent), multiline `$prepare`, and the Markdown emitter.
+interpreter is absent), multiline `$prepare` and `$assert`, baked pass/fail
+results, the Markdown emitter, and a headless render of the browser reader
+(`tests/reader_smoke.js`, run via `node`, skipped if absent).
 
 ## Output structure
 
@@ -170,6 +184,19 @@ an extractor-supplied parent such as `Foo.prototype.bar`); everything else is
 listed module-level under **Functions** / **Fields** / **Dependencies**. Classes
 are detected for all four languages (`class` in JS/PHP/Python/Ruby, plus PHP
 `interface`/`trait` and Ruby `module`); a source *file* is itself a module.
+
+### Browser reader
+
+`template.html` + `dipdoc_reader.js` are a dependency-free (no jQuery/Bootstrap)
+HTML reader for the `-f js` output. Point them at a generated `dipdoc.json` and
+open the page: a module sidebar on the left, and per module the classes,
+functions, params/returns, and — when generated with `--test` — every `$assert`
+rendered green (✓) or red (✗) with its error, so the docs and the proof they
+still hold sit together on the page (the `@example`-style goal). Generate with:
+
+```sh
+dipdoc <root> <langs> --test -o dipdoc.json -f js   # then open template.html
+```
 
 ## Limitations
 
@@ -187,9 +214,11 @@ are detected for all four languages (`class` in JS/PHP/Python/Ruby, plus PHP
   (Python `@decorator`, PHP attributes) are not attached. The doc block must sit
   directly above the declaration, or — for a Python docstring — directly below
   its `def` / `class` header.
+- `$assert` executes only via the built-in in-language harness; there is no
+  framework runner (pytest / PHPUnit / minitest / jest) yet. The harness already
+  produces the pass/fail the reader needs, so a framework runner is a follow-up,
+  not a blocker.
 - `java` has no parser module.
-- The browser reader (`dipdoc_reader.js`, `template/`) is still incomplete; use
-  `-f md` for viewable output in the meantime.
 
 ## Author
 
