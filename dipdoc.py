@@ -144,7 +144,11 @@ def _extractCall(s, key):
 		elif s[i] == ')':
 			depth -= 1
 		i += 1
-	inner = s[m.end():i - 1].strip()
+	# Collapse interior whitespace so a call wrapped across continuation lines
+	# (`params(2,\n  3)`) reads back as one clean line (`2, 3`).
+	# ponytail: also squashes intentional double-spaces inside a string literal;
+	#   upgrade to a tokeniser only if someone documents `params("a  b")`.
+	inner = ' '.join(s[m.end():i - 1].split())
 	return inner, (s[:m.start()] + ' ' + s[i:])
 
 # $assert <op> [not] [this(recv)] [params(a, b)] [result(expected)] [message]
@@ -161,18 +165,26 @@ def parseAssert(s):
 	res['params'], s = _extractCall(s, 'params')
 	res['result'], s = _extractCall(s, 'result')
 
-	words = s.split()
-	if words:
-		res['op'] = words[0]
-		words = words[1:]
-	if words and words[0] == 'not':
-		res['not'] = True
-		words = words[1:]
-	if res['op'] == 'not' and words:  # allow `not equal` as well as `equal not`
-		res['not'] = True
-		res['op'] = words[0]
-		words = words[1:]
-	res['message'] = ' '.join(words).strip() or None
+	# op + optional 'not' are whitespace-delimited keywords; everything after is
+	# the message, kept verbatim so a wrapped multi-line message survives — only
+	# leading/trailing whitespace is trimmed, interior newlines are preserved.
+	s = s.lstrip()
+	mo = re.match(r'(\S+)\s*', s)
+	if mo:
+		res['op'] = mo.group(1)
+		s = s[mo.end():]
+	if res['op'] == 'not':  # `not equal ...`
+		mo = re.match(r'(\S+)\s*', s)
+		if mo:
+			res['not'] = True
+			res['op'] = mo.group(1)
+			s = s[mo.end():]
+	else:  # `equal not ...`
+		mo = re.match(r'not\s+', s)
+		if mo:
+			res['not'] = True
+			s = s[mo.end():]
+	res['message'] = s.strip() or None
 	return res
 
 decl['unit']['prepare'] = asIs
@@ -301,15 +313,13 @@ def getCommentData(uri, tags, decl, extension='js',pref=r'/\*', suf=r'\*/', deco
 					e[tp][tag_name].append(res)
 
 			# Multiline $assert: a continuation line (no tag of its own) joins the
-			# previous assert into one logical line and re-parses it, so a long
-			# params(...)/message can wrap. Space-join keeps it single-logical-line
-			# (params balance across the wrap); newlines in messages are lost.
-			# ponytail: space-join + reparse, upgrade to newline-preserving only if
-			#   someone actually needs multi-line assert messages.
+			# previous assert and re-parses. Newline-join preserves line breaks in
+			# the message; parseAssert collapses interior whitespace inside the
+			# params(...)/result(...) calls, so those still balance across the wrap.
 			elif tp == 'unit' and tag_name == 'assert' and e[tp].get('assert') \
 					and isinstance(e[tp]['assert'][-1], dict) and stripped.strip():
 					prev = e[tp]['assert'][-1]
-					raw = (prev.get('raw', '') + ' ' + stripped.strip()).strip()
+					raw = (prev.get('raw', '') + '\n' + stripped.strip()).strip()
 					e[tp]['assert'][-1] = parseAssert(raw)
 
 			else:
@@ -512,7 +522,8 @@ def _emitEntry(out, entry, level):
 			mark = ''
 			if 'ok' in a:
 				mark = ' ✅' if a.get('ok') else ' ❌ %s' % (a.get('error') or '')
-			out.append('- _assert_: `%s`%s' % (a.get('raw', ''), mark))
+			out.append('- _assert_: `%s`%s' % (
+					a.get('raw', '').replace('\n', ' '), mark))
 
 def emitMarkdown(collector):
 	"""Render the collector as Markdown: a per-module header, a Contents

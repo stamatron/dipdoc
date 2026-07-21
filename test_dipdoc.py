@@ -329,6 +329,26 @@ def test_multiline_assert(tmp):
     print('ok: multiline assert')
 
 
+def test_multiline_assert_message(tmp):
+    # A wrapped $assert message preserves its line breaks (interior newlines),
+    # while the params(...) call still collapses to one clean line.
+    src = tmp + '/mam.js'
+    with open(src, 'w') as f:
+        f.write('/**\n'
+                ' * @description wrapped multi-line message\n'
+                ' * $assert equal params(2,\n'
+                ' *   3) result(5) first line\n'
+                ' *   second line\n'
+                ' */\n'
+                'function add(a, b) { return a + b; }\n')
+    res = _parse(src)
+    a = res['content'][0]['unit']['assert'][0]
+    assert a['params'] == '2, 3', 'wrapped params lost: %r' % a['params']
+    assert a['message'] == 'first line\nsecond line', \
+        'multi-line message not preserved: %r' % a['message']
+    print('ok: multiline assert message')
+
+
 def test_baked_assert_results(tmp):
     # --test bakes each assert's pass/fail onto the assert dict in the collector
     # (so the js/json/md output carries it for the browser reader).
@@ -427,6 +447,7 @@ if __name__ == '__main__':
         test_assert_execution_rb()
         test_multiline_prepare(tmp)
         test_multiline_assert(tmp)
+        test_multiline_assert_message(tmp)
         test_baked_assert_results(tmp)
         test_reader_renders(tmp)
         test_emit_markdown(tmp)
