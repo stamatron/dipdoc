@@ -44,6 +44,10 @@ dipdoc <root-dir> [languages] [options]
 - `--bin LANG=PATH` — interpreter path for a language (repeatable), e.g.
   `--bin py=/usr/bin/python3`. Also read from `DIPDOC_<LANG>_BIN` (e.g.
   `DIPDOC_PHP_BIN`). Defaults to whatever is found on `PATH`.
+- `--runner LANG=FRAMEWORK` — run `$assert` blocks as real test cases in a test
+  framework instead of the built-in harness (repeatable), e.g. `--runner
+  py=pytest` (`rb=minitest`, `php=phpunit`). Also read from
+  `DIPDOC_<LANG>_RUNNER`. See [framework runners](#framework-runners).
 
 Examples:
 
@@ -121,6 +125,30 @@ dipdoc tests js --test -o dipdoc.json -f js   # data + baked pass/fail for the r
 dipdoc tests js --test -f md -o docs.md       # Markdown with ✅ / ❌ per assert
 ```
 
+### Framework runners
+
+By default each `$assert` runs in the built-in in-language harness. `--runner
+LANG=FRAMEWORK` instead runs it as a real test case in a xUnit framework, so
+failures carry the framework's own diagnostics (pytest's assertion
+introspection, minitest's `assert_equal` diff, PHPUnit's messages). The pass/fail
+is baked back identically, so `-o` / `-f` and the reader work the same either way.
+
+```sh
+dipdoc tests py --test --runner py=pytest      # each $assert as a pytest test
+dipdoc tests rb --test --runner rb=minitest    # minitest (ships with Ruby stdlib)
+dipdoc src   php --test --runner php=phpunit    # PHPUnit (needs a phpunit binary)
+```
+
+- `py=pytest` — needs `pytest` importable by the interpreter (`--bin
+  py=…`/`DIPDOC_PY_BIN` selects it); if it isn't installed the module self-skips.
+- `rb=minitest` — needs nothing extra (minitest is in Ruby's stdlib).
+- `php=phpunit` — needs a `phpunit` binary on `PATH` (or `--bin
+  php=…`/`DIPDOC_PHP_BIN`). This runner mirrors the pytest one but is **untested
+  in this repo** (no PHP toolchain on the dev machine); verify against a real
+  PHPUnit before relying on it.
+
+Adding a framework = one entry in `_FRAMEWORK_RUNNERS` in `dipdoc.py`.
+
 ## Languages
 
 Each language has a parser module at `lang/<ext>.py` that supplies the comment
@@ -171,9 +199,11 @@ python3 test_dipdoc.py
 
 Framework-free smoke tests: parsing, per-language extraction, `$assert`
 parsing and execution for JS / Python / Ruby (each self-skipped if its
-interpreter is absent), multiline `$prepare` and `$assert`, baked pass/fail
-results, the Markdown emitter, and a headless render of the browser reader
-(`tests/reader_smoke.js`, run via `node`, skipped if absent).
+interpreter is absent), the minitest and pytest framework runners (pytest
+self-skips when not installed), multiline `$prepare` and `$assert` (including
+a preserved multi-line assert message), baked pass/fail results, the Markdown
+emitter, and a headless render of the browser reader (`tests/reader_smoke.js`,
+run via `node`, skipped if absent).
 
 ## Output structure
 
@@ -198,13 +228,20 @@ still hold sit together on the page (the `@example`-style goal). Generate with:
 dipdoc <root> <langs> --test -o dipdoc.json -f js   # then open template.html
 ```
 
+The theme lives in a separate **`dipdoc.css`** (linked from `template.html`),
+built on GitHub-flavoured defaults exposed as `:root` custom properties. To match
+another look — e.g. [stamat/poops](https://github.com/stamat/poops) — override
+those variables or replace `dipdoc.css` wholesale; no HTML/JS edit is needed.
+
 ## Limitations
 
 - `$assert` execution loads the module source verbatim (PHP `require`s it), so
   the documented symbol must resolve at module top level. It runs against
   self-contained modules and fixtures, not code that needs a framework runtime.
-  The built-in runners are simple in-language harnesses (assertion + try/catch),
-  not pytest / PHPUnit / minitest — those would be a follow-up.
+  This holds for the [framework runners](#framework-runners) too: pytest /
+  minitest / PHPUnit run each `$assert` as a real test case, but still load the
+  module standalone (no conftest / bootstrap / DI). The PHPUnit runner is
+  untested in this repo.
 - Members only nest under their class when the block names the class (`@this` /
   `@group` / a `parent`); the single-line extractor doesn't track lexical scope,
   so a method written plainly inside a class body lists module-level.
@@ -214,10 +251,12 @@ dipdoc <root> <langs> --test -o dipdoc.json -f js   # then open template.html
   (Python `@decorator`, PHP attributes) are not attached. The doc block must sit
   directly above the declaration, or — for a Python docstring — directly below
   its `def` / `class` header.
-- `$assert` executes only via the built-in in-language harness; there is no
-  framework runner (pytest / PHPUnit / minitest / jest) yet. The harness already
-  produces the pass/fail the reader needs, so a framework runner is a follow-up,
-  not a blocker.
+- A wrapped multi-line `$assert` joins its continuation lines: interior
+  whitespace inside `params(...)` / `result(...)` is collapsed to keep them on
+  one logical line, while line breaks in the trailing **message** are preserved.
+- Framework runners cover pytest and minitest; a jest runner for JS isn't wired
+  (the built-in `node` harness already runs JS `$assert`s), and the PHPUnit
+  runner ships untested. Each is one `_FRAMEWORK_RUNNERS` entry to add/verify.
 - `java` has no parser module.
 
 ## Author
