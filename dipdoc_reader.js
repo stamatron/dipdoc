@@ -90,7 +90,7 @@
 			if ('ok' in a) { cls += a.ok ? ' pass' : ' fail'; mark = a.ok ? '✓' : '✗'; }
 			var row = el('div', cls);
 			if (mark) row.appendChild(el('span', 'mark', mark));
-			row.appendChild(el('code', null, a.raw || ''));
+			row.appendChild(el('code', 'raw', a.raw || ''));
 			if ('ok' in a && !a.ok && a.error) row.appendChild(el('span', 'err', a.error));
 			box.appendChild(row);
 		});
