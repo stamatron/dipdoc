@@ -1,58 +1,70 @@
 <!doctype html>
-<html>
-	<head>
-		<title>DipDoc</title>
-		<link rel="stylesheet" href="template/css/bootstrap.css">
-		<script src="dipdoc.json"></script>
-		<script src="ivartech/third-party/jquery.min.js"></script>
-		<script src="ivartech/main.js"></script>
-		<script src="dipdoc_reader.js"></script>
-	</head>
-	<body>
-		<div class="container">
-			<br />
-			<ul class="nav nav-tabs">
-			  <li class="active">
-				<a href="#!index">Documentation</a>
-			  </li>
-			  <li style="float:right"><a href="#!readme"><i class="icon-warning-sign"></i> License</a></li>
-			  <li style="float:right"><a href="#!readme"><i class=" icon-book"></i> README</a></li>
-			  <li style="float:right"><a href="#!readme"><i class=" icon-user"></i> Authors</a></li>
-			  <li style="float:right"><a href="#!installation"><i class="icon-cog"></i> Installation</a></li>
-			</ul>
-			<ul class="breadcrumb">
-			  <li><a href="#">Overview</a> <span class="divider">/</span></li>
-			  <li><a href="#">Module</a> <span class="divider">/</span></li>
-			  <li class="active">Class</li>
-			</ul>
-			<div id="overview">
-				<div class="description">
-					<h1>ivartech js</h1>
-					<p>Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.</p>
-						<dl class="dl-horizontal">
-						  <dt>Author</dt>
-						  <dd>ivartech.com</dd>
-						</dl>
-
-				</div>
-			
-				<table class="table module-overview table-bordered">
-		          <thead>
-		            <tr>
-		              <th>Module</th>
-		              <th>Description</th>
-		            </tr>
-		          </thead>
-		          <tbody>
-		          </tbody>
-		        </table>
-		    </div>
-            <footer>
-            	&copy; 2013. dipdoc by <a href="#">ivartech</a>
-            </footer>
-       </div>
-	</body>
-	<div id="tempaltes">
-		
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>DipDoc</title>
+	<style>
+		:root {
+			--fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --bg: #fff;
+			--accent: #0969da; --code-bg: #f6f8fa;
+			--pass: #1a7f37; --pass-bg: #dafbe1; --fail: #cf222e; --fail-bg: #ffebe9;
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0; color: var(--fg); background: var(--bg);
+			font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+		}
+		code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 85%; }
+		code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+		pre { background: var(--code-bg); padding: 12px 16px; border-radius: 6px; overflow-x: auto; }
+		pre code { background: none; padding: 0; }
+		a { color: var(--accent); text-decoration: none; }
+		a:hover { text-decoration: underline; }
+		.layout { display: flex; align-items: flex-start; max-width: 1100px; margin: 0 auto; }
+		nav {
+			position: sticky; top: 0; align-self: flex-start; width: 260px; flex: none;
+			height: 100vh; overflow-y: auto; padding: 24px 16px; border-right: 1px solid var(--line);
+		}
+		nav h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; border: 0; padding: 0; }
+		nav a { display: block; padding: 3px 8px; border-radius: 5px; color: var(--fg); font-size: 14px; }
+		nav a.active, nav a:hover { background: var(--code-bg); text-decoration: none; }
+		main { flex: 1; min-width: 0; padding: 24px 32px; }
+		h1 { font-size: 28px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+		h2 { font-size: 22px; margin-top: 32px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+		h3 { font-size: 17px; margin-top: 24px; }
+		.meta { color: var(--muted); font-size: 14px; }
+		.desc { white-space: pre-wrap; }
+		.entry { padding: 4px 0 8px; }
+		.tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; margin-left: 8px; vertical-align: middle; }
+		ul.params { list-style: none; padding-left: 0; }
+		ul.params li { margin: 2px 0; }
+		.asserts { margin: 8px 0; }
+		.assert {
+			display: flex; gap: 8px; align-items: baseline;
+			border-left: 3px solid var(--line); padding: 4px 10px; margin: 3px 0;
+			background: var(--code-bg); border-radius: 0 5px 5px 0;
+		}
+		.assert.pass { border-left-color: var(--pass); background: var(--pass-bg); }
+		.assert.fail { border-left-color: var(--fail); background: var(--fail-bg); }
+		.assert .mark { flex: none; font-weight: 700; }
+		.assert.pass .mark { color: var(--pass); }
+		.assert.fail .mark { color: var(--fail); }
+		.assert .err { color: var(--fail); font-size: 13px; }
+		.summary { font-size: 13px; color: var(--muted); }
+		.summary .ok { color: var(--pass); }
+		.summary .no { color: var(--fail); }
+	</style>
+</head>
+<body>
+	<div class="layout">
+		<nav id="nav"></nav>
+		<main id="app">Loading&hellip;</main>
 	</div>
+	<!-- Generated data: `dipdoc <root> <langs> --test -o dipdoc.json -f js`
+	     ('js' format wraps the JSON as `var dipdoc = {...}` and, with --test,
+	     bakes each $assert's pass/fail into the data this reader renders). -->
+	<script src="dipdoc.json"></script>
+	<script src="dipdoc_reader.js"></script>
+</body>
 </html>
